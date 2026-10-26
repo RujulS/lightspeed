@@ -23,8 +23,10 @@ export class Sound {
     this.audio = new Audio();
     this.audio.loop = true;
     this.audio.preload = 'none';
-    this.ready = fetch('music/tracks.json').then((r) => (r.ok ? r.json() : [])).catch(() => []).then((t) => {
-      this.tracks = Array.isArray(t) ? t : [];
+    // tracks.json is published; music/local/tracks.json (git-ignored) lists files kept on this machine only
+    const list = (url) => fetch(url).then((r) => (r.ok ? r.json() : [])).then((t) => (Array.isArray(t) ? t : [])).catch(() => []);
+    this.ready = Promise.all([list('music/tracks.json'), list('music/local/tracks.json')]).then(([pub, local]) => {
+      this.tracks = [...local, ...pub];
       if (!this.tracks.some((x) => x.file === this.track)) this.track = this.tracks[0]?.file ?? null;
     });
     const unlock = () => { this.start(); removeEventListener('pointerdown', unlock); removeEventListener('keydown', unlock); };

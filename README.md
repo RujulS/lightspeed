@@ -23,7 +23,7 @@ Put audio files (MP3, M4A or OGG) in `public/music/` and list them in `public/mu
 [{ "file": "deep-field.mp3", "title": "Deep Field" }]
 ```
 
-They then appear in the music menu (the note icon, top right, during a trip). Sound effects are synthesised in the browser and need no files.
+Files you only want on your own machine go in `public/music/local/` with their own `tracks.json` (file paths start with `local/`); that folder is git-ignored. They then appear in the music menu (the note icon, top right, during a trip). Sound effects are synthesised in the browser and need no files.
 
 ## What it models
 
