@@ -15,6 +15,16 @@ npm run dev
 
 Then open http://localhost:5199. `npm run build` writes a static site to `dist/`.
 
+## Music
+
+Put audio files (MP3, M4A or OGG) in `public/music/` and list them in `public/music/tracks.json`:
+
+```json
+[{ "file": "deep-field.mp3", "title": "Deep Field" }]
+```
+
+They then appear in the music menu (the note icon, top right, during a trip). Sound effects are synthesised in the browser and need no files.
+
 ## What it models
 
 - **Trips:** real planet positions (JPL elements). Planet trips by slow ships follow ballistic transfer orbits; the others fly straight relativistic acceleration, coast and braking profiles. Time aboard and on Earth both come out of the same rapidity integration.

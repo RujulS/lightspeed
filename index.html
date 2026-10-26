@@ -59,15 +59,36 @@
   </section>
 
   <!-- ============================================================ tools -->
+  <button id="b-new" class="hidden">‹ Menu</button>
   <nav id="tools" class="hidden">
-    <button id="b-new" class="ghost">‹ Menu</button>
-    <div class="seg" id="seg-cam" title="Camera (C)"><button data-v="cine" class="on" title="Frames planets and moons as they pass; otherwise looks ahead to the destination">Cinematic</button><button data-v="chase">Chase</button><button data-v="orbit">Orbit</button></div>
-    <div class="seg" id="seg-focus"><button data-v="probe" class="on">Ship</button><button data-v="dest">Destination</button><button data-v="earth">Earth</button></div>
-    <button id="b-orbits" class="tog on" title="Planet orbits &amp; flight path (O)">Paths</button>
-    <button id="b-moons" class="tog on" title="Moons of the planets (M)">Moons</button>
-    <button id="b-labels" class="tog on" title="Labels (L)">Labels</button>
-    <button id="b-disk" class="tog on hidden" title="Show an accretion disk">Disk</button>
-    <button id="b-info" class="tog" title="About &amp; credits">i</button>
+    <button id="b-music" class="icon" title="Music" aria-label="Music" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+    </button>
+    <button id="b-settings" class="icon" title="Settings" aria-label="Settings" aria-expanded="false">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+
+    <div id="pop-music" class="pop panel hidden">
+      <div class="pop-row"><label>Music</label><button id="b-music-on" class="tog">Off</button></div>
+      <div class="pop-row"><label>Volume</label><input id="i-volume" type="range" min="0" max="1" step="0.05" /></div>
+      <div class="pop-tracks" id="music-tracks"></div>
+    </div>
+
+    <div id="pop-settings" class="pop panel hidden">
+      <div class="pop-row"><label>Camera</label>
+        <div class="seg" id="seg-cam" title="Camera (C)"><button data-v="cine" class="on" title="Frames planets and moons as they pass; otherwise looks ahead to the destination">Cinematic</button><button data-v="chase">Chase</button><button data-v="orbit">Orbit</button></div></div>
+      <div class="pop-row"><label>Look at</label>
+        <div class="seg" id="seg-focus"><button data-v="probe" class="on">Ship</button><button data-v="dest">Destination</button><button data-v="earth">Earth</button></div></div>
+      <div class="pop-row"><label>Show</label>
+        <div class="pop-togs">
+          <button id="b-orbits" class="tog on" title="Planet orbits &amp; flight path (O)">Paths</button>
+          <button id="b-moons" class="tog on" title="Moons of the planets (M)">Moons</button>
+          <button id="b-labels" class="tog on" title="Labels (L)">Labels</button>
+          <button id="b-disk" class="tog on hidden" title="Show an accretion disk">Disk</button>
+        </div></div>
+      <div class="pop-row"><label>Sound effects</label><button id="b-sfx" class="tog on">On</button></div>
+      <button id="b-info" class="pop-link">About &amp; credits</button>
+    </div>
   </nav>
 
   <!-- ============================================================ mission bar (distance, stages, time flow) -->

@@ -8,6 +8,7 @@ import { createPanorama, createStarfield } from './sky.js';
 import { createGalaxies, updateGalaxy, M31_GROUP, GALAXY_SPLIT } from './galaxies.js';
 import { Planet, Star, bbColorJS, textureProgress, preloadTextures } from './bodies.js';
 import { loadTexture, loadTextureAsync, useRenderer } from './textures.js';
+import { Sound } from './audio.js';
 import { WorldLine } from './lines.js';
 import { MoonSystem } from './moons.js';
 import { ProbeModel } from './probes3d.js';
@@ -29,6 +30,7 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 useRenderer(renderer);
+const sound = new Sound();
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.004, 1e16);
 const scene = new THREE.Scene();
@@ -427,7 +429,7 @@ const menu = new Menu({
     await prepareLaunch(menu.dest, menu.probe, menu.launchT());
   },
 });
-function showRunUI(v) { for (const id of ['hud', 'tools', 'missionbar', 'mappanel']) $(id).classList.toggle('hidden', !v); if (!v) $('radar-big').classList.add('hidden'); layoutTop(); }
+function showRunUI(v) { openPop(null); for (const id of ['hud', 'tools', 'b-new', 'missionbar', 'mappanel']) $(id).classList.toggle('hidden', !v); if (!v) $('radar-big').classList.add('hidden'); layoutTop(); }
 // Keep the top-centre readout clear of the top-right buttons: measured, not a fixed breakpoint, since
 // both change width (window size, the numbers themselves, the Disk button). If they would touch, the
 // readout (and the update text under it) drops below the buttons, and the arrival card below that.
@@ -481,8 +483,9 @@ $('b-go').onclick = async () => {
   $('launchpad').classList.add('hidden');
   const cd = $('countdown');
   cd.classList.remove('hidden', 'go');
-  for (const n of ['3', '2', '1']) { cd.textContent = n; await new Promise((r) => setTimeout(r, 800)); }
+  for (const n of ['3', '2', '1']) { cd.textContent = n; sound.beep(); await new Promise((r) => setTimeout(r, 800)); }
   cd.textContent = 'LIFTOFF'; cd.classList.add('go');
+  sound.beep(true); sound.ignition();
   app.prelaunch = false;
   $('missionbar').classList.remove('hidden'); $('mappanel').classList.remove('hidden');
   app.playing = true; $('b-play').textContent = '❚❚';
@@ -509,7 +512,42 @@ function togglePlay() { if (app.prelaunch) return; app.playing = !app.playing; $
 $('b-orbits').onclick = () => { app.showOrbits = !app.showOrbits; $('b-orbits').classList.toggle('on', app.showOrbits); };
 $('b-moons').onclick = () => { app.showMoons = !app.showMoons; $('b-moons').classList.toggle('on', app.showMoons); };
 $('b-labels').onclick = () => { app.showLabels = !app.showLabels; $('b-labels').classList.toggle('on', app.showLabels); };
-$('b-info').onclick = () => $('info').classList.toggle('hidden');
+$('b-info').onclick = () => { openPop(null); $('info').classList.toggle('hidden'); };
+
+// ---- music & settings: two dropdowns in the top-right corner; a click elsewhere or Esc closes them
+const POPS = { 'b-music': 'pop-music', 'b-settings': 'pop-settings' };
+function openPop(btn) {
+  for (const [b, p] of Object.entries(POPS)) {
+    const on = b === btn && $(p).classList.contains('hidden');
+    $(p).classList.toggle('hidden', !on); $(b).setAttribute('aria-expanded', on);
+  }
+}
+for (const b of Object.keys(POPS)) $(b).onclick = () => { openPop(b); if (b === 'b-music') renderTracks(); };
+addEventListener('pointerdown', (e) => { if (!e.target.closest('#tools')) openPop(null); });
+function syncSound() {
+  for (const [id, on] of [['b-sfx', sound.sfxOn], ['b-music-on', sound.musicOn]]) { $(id).classList.toggle('on', on); $(id).textContent = on ? 'On' : 'Off'; }
+  $('i-volume').value = sound.volume;
+}
+function renderTracks() {
+  const box = $('music-tracks');
+  box.innerHTML = sound.tracks.length
+    ? sound.tracks.map((t) => `<button data-f="${t.file}" class="${t.file === sound.track ? 'on' : ''}">${t.title}</button>`).join('')
+    : '<p class="pop-empty">No music added yet.</p>';
+}
+$('b-sfx').onclick = () => { sound.setSfx(!sound.sfxOn); syncSound(); };
+$('b-music-on').onclick = () => { sound.setMusic(!sound.musicOn); syncSound(); };
+$('i-volume').oninput = (e) => sound.setVolume(+e.target.value);
+$('music-tracks').onclick = (e) => {
+  const b = e.target.closest('[data-f]');
+  if (!b) return;
+  sound.setTrack(b.dataset.f);
+  if (!sound.musicOn) sound.setMusic(true);
+  syncSound(); renderTracks();
+};
+syncSound();
+sound.ready.then(renderTracks);
+passbys.onPass = () => sound.whoosh(1);
+passbys.onField = (dur) => sound.rocks(dur);
 $('b-info-close').onclick = () => $('info').classList.add('hidden');
 // the time factor: one setting for the whole trip, stepped with ‹ ›, Reset back to the default
 function setFactor(f, announce) {
@@ -523,6 +561,7 @@ $('tf-slow').onclick = () => setFactor(stepRate(app.factor, -1), true);
 $('tf-fast').onclick = () => setFactor(stepRate(app.factor, 1), true);
 $('tf-reset').onclick = () => setFactor(app.defaultFactor, true);
 addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') openPop(null);
   if (e.target.tagName === 'INPUT') return;
   if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
   if (e.key === 'o') $('b-orbits').click();
@@ -643,7 +682,7 @@ function frame(now) {
     if (ctl.frame) swingToChase(soon ? 4 : 10);
   }
   if (st.arrived && !app.arrivedShown) {
-    app.arrivedShown = true; showArrival(st);
+    app.arrivedShown = true; showArrival(st); sound.arrive();
     if (m.dest.id === 'andromeda') facts.announce('Andromeda', 'The faint stars all around are Andromeda\'s own halo, with its star clusters and neighbouring galaxies, shown as a long-exposure camera would record them. To the eye, only Andromeda itself, the Milky Way behind you and, just barely, Triangulum would be visible.');
     if (m.dest.kind === 'blackhole') blackHoleView();
     else if (m.dest.kind === 'galaxy') galaxyView();
@@ -875,6 +914,7 @@ function frame(now) {
     app.quat.rotateTowards(q, dt * 0.45); // turns (the flip, entering orbit) at a steady, visible ~26°/s
     probeRoot.quaternion.copy(app.quat);
     pm.update(app.playing ? st.accel : 0, wall, app.warp);
+    sound.engine(app.playing && st.accel > 0 && probeRoot.visible && !menu.visible ? 1 : 0);
     // light from the nearest star (or the destination galaxy in deep space)
     const near = [[sunW, 5772, dSun, 4.83], [PROXIMA.pos, 3042, dProx, 15.5], [compW, 5850, dComp, 5.0]]
       .map(([p, T, d, M]) => ({ p, T, d, I: Math.pow(10, -0.4 * (M + 5 * Math.log10(d / PC) - 5)) }))
@@ -1105,7 +1145,7 @@ requestAnimationFrame(frame);
 $('loading').style.opacity = 0;
 setTimeout(() => $('loading').remove(), 900);
 // dev-only hook for scripted camera tours while tuning visuals
-if (import.meta.env.DEV) window.__ls = { renderer, composer, lens, bloom, renderLowLayer, lowQuad, GALAXY_SPLIT, galaxies, mainPass, probePass, scene, probeScene, app, menu, passbys, radar, ctl, advance, camera };
+if (import.meta.env.DEV) window.__ls = { renderer, composer, lens, bloom, sound, renderLowLayer, lowQuad, GALAXY_SPLIT, galaxies, mainPass, probePass, scene, probeScene, app, menu, passbys, radar, ctl, advance, camera };
 if (import.meta.env.DEV) addEventListener('message', async (e) => {
   const c = e.data && e.data.ls;
   if (!c) return;

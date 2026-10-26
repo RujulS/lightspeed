@@ -20,6 +20,24 @@ export function fmtDist(m) {
   return big(m / LY, 'ly');
 }
 
+/** Menu distances: kilometres in words ("3.5 million km"), light-years only beyond the Solar System. */
+export function fmtKm(m) {
+  m = Math.abs(m);
+  if (m >= 0.05 * LY) return big(m / LY, 'ly');
+  const km = m / 1e3;
+  const w = (x, unit) => `${nf(x, x < 10 ? 1 : 0)} ${unit} km`;
+  if (km >= 1e9) return w(km / 1e9, 'billion');
+  if (km >= 1e6) return w(km / 1e6, 'million');
+  return `${nf(km)} km`;
+}
+
+/** A speed as a percentage of light speed: "20% c", "3.3% c", "0.064% c", "0.0057% c". */
+export function fmtPctC(beta) {
+  const p = beta * 100;
+  if (p >= 99.95) return '100% c';
+  return `${p >= 1 ? nf(p, p % 1 < 0.05 ? 0 : 1) : Number(p.toPrecision(2)).toString()}% c`;
+}
+
 export function fmtTime(s) {
   s = Math.abs(s);
   if (!isFinite(s)) return '∞';

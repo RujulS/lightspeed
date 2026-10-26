@@ -170,6 +170,7 @@ export class Passbys {
     if (this.queue.length && !this.active.length) {
       const e = this.queue.shift();
       this.active.push({ ...e, ...this.basis(ctx), start: wall, dur: FIELD_S });
+      this.onField?.(FIELD_S);
     }
     for (const a of [...this.active]) {
       const u = (wall - a.start) / a.dur;
@@ -200,6 +201,8 @@ export class Passbys {
     this.systems[e.id]?.update(w, ctx.moons);
     // for the cinematic camera: turn toward it as it rushes in, watch it go by, then let go
     const s = along / R, th = Math.atan2(CAM_SIDE, s);
+    // sound: the whoosh is started ~1 screen second (5 radii at the pass rate) before closest approach
+    if (!e.heard && s <= PASS && s > -SLOW) { e.heard = true; this.onPass?.(e); }
     const out = v3.norm(v3.add(v3.scale(side, SIDE), v3.scale(up, 0.35)));
     const dir = v3.add(v3.scale(f, Math.cos(th)), v3.scale(out, Math.sin(th)));
     let weight;

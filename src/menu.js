@@ -6,7 +6,7 @@ import { DESTINATIONS, RADIUS } from './destinations.js';
 import { Planet, bbColorJS } from './bodies.js';
 import { ProbeModel } from './probes3d.js';
 import { createAndromedaDisk, setDiskBasis } from './andromeda.js';
-import { $, fmtDist, fmtTime } from './ui.js';
+import { $, fmtKm, fmtPctC, fmtTime } from './ui.js';
 
 // Main menu: a dedicated 3-D stage with the chosen destination slowly turning in the background and
 // the chosen spacecraft in the foreground, framed by two minimal pick-lists.
@@ -59,6 +59,9 @@ function glowSprite(color, size) {
   s.scale.setScalar(size);
   return s;
 }
+
+/** A ship's design top speed as a fraction of c (1 for the antimatter ship, which approaches c). */
+const topSpeed = (p) => (p.kind === 'cruise' ? p.v / C : p.kind === 'ballistic' ? p.cruise / C : p.stages.at(-1).beta);
 
 export class Menu {
   constructor({ panorama, stars, envMap, onContinue, canvas }) {
@@ -119,15 +122,12 @@ export class Menu {
     for (const d of DESTINATIONS) {
       if (d.group !== g) { g = d.group; html += `<div class="m-group">${g}</div>`; }
       const dist = v3.len(v3.sub(d.pos(t), planetPos('earth', t)));
-      html += `<button class="m-item" data-d="${d.id}"><span class="nm">${d.short || d.name}</span><span class="dd">${fmtDist(dist)}</span></button>`;
+      html += `<button class="m-item" data-d="${d.id}"><span class="nm">${d.short || d.name}</span><span class="dd">${fmtKm(dist)}</span></button>`;
     }
     $('m-dests').innerHTML = html;
-    $('m-probes').innerHTML = PROBES.map((p) => {
-      const top = p.kind === 'cruise' ? p.v / 1e3 + ' km/s' : p.kind === 'ballistic' ? p.cruise / 1e3 + ' km/s'
-        : p.stages.at(-1).beta >= 1 ? '→ c' : (p.stages.at(-1).beta * 100).toFixed(1) + '% c';
-      return `<button class="m-item" data-p="${p.id}"><div class="row"><span class="nm">${p.name}</span><span class="dd">${top}</span></div>`
-        + `<div class="row"><span class="tg">${p.tag}</span><span class="tt"></span></div></button>`;
-    }).join('');
+    // name and trip time (filled in by rankProbes) first; the kind of ship and its top speed below
+    $('m-probes').innerHTML = PROBES.map((p) => `<button class="m-item" data-p="${p.id}"><div class="row"><span class="nm">${p.name}</span><span class="tt"></span></div>`
+      + `<div class="row"><span class="tg">${p.tag}</span><span class="dd">${topSpeed(p) >= 1 ? '→ 100% c' : fmtPctC(topSpeed(p))}</span></div></button>`).join('');
     this.rankKey = null;
     $('m-dests').onclick = (e) => { const b = e.target.closest('[data-d]'); if (b) { this.dest = b.dataset.d; this.select('dest'); } };
     $('m-probes').onclick = (e) => { const b = e.target.closest('[data-p]'); if (b) { this.probe = b.dataset.p; this.select('probe'); } };
@@ -172,13 +172,12 @@ export class Menu {
     this.rankProbes(d, t);
     $('m-dest-group').textContent = d.group;
     $('m-dest-name').textContent = d.name;
-    $('m-dest-sub').textContent = `${fmtDist(dist)} from Earth`;
+    $('m-dest-sub').textContent = `${fmtKm(dist)} from Earth`;
     $('m-dest-desc').textContent = d.facts;
     $('m-probe-tag').textContent = p.tag;
     $('m-probe-name').textContent = p.name;
-    const top = p.kind === 'cruise' ? `${p.v / 1e3} km/s` : p.kind === 'ballistic' ? `${p.cruise / 1e3} km/s cruise`
-      : p.stages.at(-1).beta >= 1 ? 'Accelerates toward light speed' : `Up to ${(p.stages.at(-1).beta * 100).toFixed(1)}% of light speed`;
-    $('m-probe-sub').textContent = top;
+    const top = topSpeed(p);
+    $('m-probe-sub').textContent = top >= 1 ? 'Accelerates toward light speed' : p.kind === 'thrust' ? `Up to ${fmtPctC(top)}` : `Cruises at ${fmtPctC(top)}`;
     $('m-blurb').textContent = p.blurb;
     $('m-trip').textContent = fmtTime(m.t0 - t + m.tArrive);
     const ab = m.shipTimeAtArrival();
@@ -186,7 +185,7 @@ export class Menu {
     $('m-aboard').textContent = fmtTime(ab);
     $('m-light').textContent = fmtTime(dist / C);
     const mb = m.maxBeta();
-    $('m-top').textContent = mb < 0.01 ? `${(mb * C / 1e3).toFixed(1)} km/s` : `${(mb * 100).toFixed(mb > 0.999 ? 3 : 1)}% c`;
+    $('m-top').textContent = mb > 0.999 ? `${(mb * 100).toFixed(3)}% c` : fmtPctC(mb);
     const ids = ['m-trip', ...(kind === 'probe' ? ['m-probe-name', 'm-blurb'] : kind === 'dest' ? ['m-dest-name', 'm-dest-desc'] : [])];
     for (const id of ids) { const el = $(id); el.classList.remove('m-fade'); void el.offsetWidth; el.classList.add('m-fade'); }
   }
