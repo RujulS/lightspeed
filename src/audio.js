@@ -11,7 +11,7 @@ const store = {
 export class Sound {
   constructor() {
     this.sfxOn = store.get('sfx', true);
-    this.musicOn = store.get('music', true);
+    this.musicOn = store.get('music', false);
     this.track = store.get('track', null);
     this.volume = store.get('volume', 0.6);
     this.tracks = [];
