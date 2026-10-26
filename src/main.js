@@ -5,7 +5,7 @@ import { PROBES, Mission, probeById } from './missions.js';
 import { destById, RADIUS, PROXIMA, PROXIMA_PC, PROXIMA_B, GAIA_BH1, bh1CompanionPos, proximaBPos, GALAXIES } from './destinations.js';
 import { REL, setObserverVelocity } from './shaders/common.js';
 import { createPanorama, createStarfield } from './sky.js';
-import { createGalaxies, updateGalaxy, M31_GROUP } from './galaxies.js';
+import { createGalaxies, updateGalaxy, M31_GROUP, GALAXY_SPLIT } from './galaxies.js';
 import { Planet, Star, bbColorJS, texturesReady } from './bodies.js';
 import { WorldLine } from './lines.js';
 import { MoonSystem } from './moons.js';
@@ -51,6 +51,34 @@ scene.add(stars);
 loadText('Building galaxies…');
 const galaxies = createGalaxies();
 for (const g of Object.values(galaxies)) scene.add(g);
+// The galaxies' big soft blobs (layer 1) are drawn into a half-resolution layer first, then laid over the
+// frame between the galaxy stars and the dust (renderOrder −75): rgb is added, alpha (the dust's
+// transmission) darkens what was drawn before, just as the full-resolution blobs would have.
+const SPLIT_PX = 10;
+const lowRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+const sizeLow = () => { const s = renderer.getDrawingBufferSize(new THREE.Vector2()); lowRT.setSize(Math.ceil(s.x / 2), Math.ceil(s.y / 2)); };
+sizeLow();
+const lowQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms: { tLow: { value: lowRT.texture } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: 'uniform sampler2D tLow; varying vec2 vUv; void main() { gl_FragColor = texture2D(tLow, vUv); }',
+  depthTest: false, depthWrite: false, blending: THREE.CustomBlending,
+  blendSrc: THREE.OneFactor, blendDst: THREE.SrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+}));
+lowQuad.frustumCulled = false;
+lowQuad.renderOrder = -75;
+scene.add(lowQuad);
+const lowClear = new THREE.Color();
+function renderLowLayer(split = SPLIT_PX) {
+  const on = mainPass.scene === scene && Object.values(galaxies).some((g) => g.visible);
+  GALAXY_SPLIT.value = on ? split : 1e9;
+  lowQuad.visible = on;
+  if (!on) return;
+  renderer.getClearColor(lowClear); const a = renderer.getClearAlpha();
+  renderer.setRenderTarget(lowRT); renderer.setClearColor(0x000000, 1);
+  camera.layers.set(1); renderer.render(scene, camera); camera.layers.set(0);
+  renderer.setClearColor(lowClear, a); renderer.setRenderTarget(null);
+}
 
 loadText('Rendering planets…');
 const PLANETS = ['mercury', 'venus', 'earth', 'moon', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto'];
@@ -79,6 +107,7 @@ const BH_DISK_N = (() => {
 // equatorial plane. Thin-disk constants: the innermost stable circular orbit (Bardeen, Press &
 // Teukolsky 1972) and the Page–Thorne flux coefficients, normalised to a peak of 1.
 const BH_SPIN = 0.9;
+let BLOOM = bloom.strength;
 (function kerrDisk(a) {
   const z1 = 1 + Math.cbrt(1 - a * a) * (Math.cbrt(1 + a) + Math.cbrt(1 - a)), z2 = Math.sqrt(3 * a * a + z1 * z1);
   const isco = 3 + z2 - Math.sqrt((3 - z1) * (3 + z1 + 2 * z2));
@@ -93,7 +122,7 @@ const BH_SPIN = 0.9;
   let fmax = 0;
   for (let r = isco * 1.0001; r < 24; r += 0.01) fmax = Math.max(fmax, flux(r));
   const u = lens.uniforms;
-  u.uSpin.value = a; u.uIsco.value = isco; u.uDiskOut.value = 24;
+  u.uSpin.value = a; u.uIsco.value = isco; u.uDiskOut.value = 16;   // a compact disk: a thin, crisp band
   u.uPT0.value.set(x0, xs[0], xs[1], xs[2]); u.uPT1.value.set(cs[0], cs[1], cs[2], 1 / fmax);
 })(BH_SPIN);
 const spinX = (n) => v3.norm(v3.cross(n, Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
@@ -467,6 +496,7 @@ addEventListener('keydown', (e) => {
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
+  sizeLow();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   menu.resize();
@@ -745,8 +775,13 @@ function frame(now) {
   const pano = 1 - smoothstep(350, 2500, dSunPc);
   panorama.material.uniforms.uGain.value = pano * keep;
   const proj = pxPerRad * DPR;
-  updateGalaxy(galaxies.milkyway, camPc, proj, smoothstep(350, 2500, dSunPc) * keep);
-  const ext = smoothstep(150, 1500, dSunPc);
+  // layers faded to nothing are not drawn at all (the panorama covers the whole screen; the Milky Way
+  // model is 310,000 points)
+  const mwFade = smoothstep(350, 2500, dSunPc) * keep, ext = smoothstep(150, 1500, dSunPc);
+  panorama.visible &&= pano > 0;
+  galaxies.milkyway.visible &&= mwFade > 0;
+  galaxies.andromeda.visible &&= ext > 0;
+  updateGalaxy(galaxies.milkyway, camPc, proj, mwFade);
   updateGalaxy(galaxies.andromeda, camPc, proj, ext * keep);
   // Andromeda's halo stars, clusters and neighbours: long-exposure view, only near M31
   const m31c = galaxies.andromeda.userData.centerPc;
@@ -778,7 +813,7 @@ function frame(now) {
     lens.uniforms.uCamBH.value.set(-bhRel[0] / GAIA_BH1.rs, -bhRel[1] / GAIA_BH1.rs, -bhRel[2] / GAIA_BH1.rs);
     lens.uniforms.uDiskN.value.set(...BH_DISK_N);
     lens.uniforms.uSpinX.value.set(...BH_SPIN_X);
-    lens.uniforms.uBgGain.value = 2; lens.uniforms.uDiskGain.value = 6;
+    lens.uniforms.uBgGain.value = 2; lens.uniforms.uDiskGain.value = 2;
     lens.uniforms.uTime.value = wall;
     lens.uniforms.uSkyGain.value = 0.1 * pano * (lens.uniforms.uRay.value ? 1.25 : 1); // a brighter Milky Way behind the disk
   }
@@ -876,7 +911,7 @@ function frame(now) {
     const bh = menu.blackHoleView();
     if (bh) {
       const u = lens.uniforms, cam = menu.camera;
-      u.uActive.value = 1; u.uRay.value = 1; u.uDisk.value = 1; u.uBgGain.value = 1; u.uDiskGain.value = 3; u.uTime.value = wall;
+      u.uActive.value = 1; u.uRay.value = 1; u.uDisk.value = 1; u.uBgGain.value = 1; u.uDiskGain.value = 1; u.uTime.value = wall;
       u.uRs.value = 1; u.uDist.value = bh.dist;
       u.uCamBH.value.set(...v3.scale(bh.dir, -bh.dist));
       u.uDiskN.value.set(...bh.normal); u.uSpinX.value.set(...spinX(bh.normal));
@@ -888,6 +923,9 @@ function frame(now) {
     probePass.scene = probeScene; probePass.camera = camera; probePass.enabled = true;
   }
   lens.enabled = lens.uniforms.uActive.value > 0; // skip the full-screen lens pass when it would only copy
+  // half the bloom on the ray-traced hole keeps the disk a sharp band instead of a wide haze
+  bloom.strength = BLOOM * (lens.enabled && lens.uniforms.uRay.value > 0.5 ? 0.5 : 1);
+  renderLowLayer();
   composer.render();
 }
 
@@ -1030,7 +1068,7 @@ requestAnimationFrame(frame);
 $('loading').style.opacity = 0;
 setTimeout(() => $('loading').remove(), 900);
 // dev-only hook for scripted camera tours while tuning visuals
-if (import.meta.env.DEV) window.__ls = { renderer, composer, lens, bloom, mainPass, probePass, scene, probeScene, app, menu, passbys, radar, ctl, advance, camera };
+if (import.meta.env.DEV) window.__ls = { renderer, composer, lens, bloom, renderLowLayer, lowQuad, GALAXY_SPLIT, galaxies, mainPass, probePass, scene, probeScene, app, menu, passbys, radar, ctl, advance, camera };
 if (import.meta.env.DEV) addEventListener('message', async (e) => {
   const c = e.data && e.data.ls;
   if (!c) return;
@@ -1046,7 +1084,7 @@ if (import.meta.env.DEV) addEventListener('message', async (e) => {
   if (c.menu) { menu.dest = c.menu[0]; menu.probe = c.menu[1]; menu.select(c.menuFocus); }
   if (c.play !== undefined) app.playing = c.play;
   if (c.warp) app.warp = c.warp;
-  if (c.bloom !== undefined) bloom.strength = c.bloom;
+  if (c.bloom !== undefined) BLOOM = c.bloom;
   if (c.glare !== undefined) for (const st of [sun, proxima, bhStar]) st.glare.visible = c.glare;
   if (c.hide) {
     const groups = { planets: Object.values(planets).map((p) => p.root), galaxies: Object.values(galaxies), stars: [stars], pano: [panorama], probe: [probeRoot], path: [pathLine, orbitGroup] };

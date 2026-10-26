@@ -101,6 +101,7 @@ attribute float aSize;
 uniform vec3 uCenter;     // galaxy centre relative to camera (pc)
 uniform mat3 uBasis;
 uniform float uProj, uGain, uFade, uMaxPx;
+uniform float uSplit, uLow, uScale; // blobs at least uSplit px across go to the half-resolution layer
 varying vec3 vColor;
 varying float vSoft;
 void main() {
@@ -112,6 +113,7 @@ void main() {
   I *= smoothstep(aSize * 0.5, aSize * 3.0, d);            // dissolve clouds the camera is inside
   if (px < 1.6) { I *= (px / 1.6) * (px / 1.6); px = 1.6; }  // conserve flux below one pixel
   if (px > uMaxPx) { px = uMaxPx; }
+  if ((px >= uSplit) != (uLow > 0.5)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
   float D = dopplerRest(n);
   // where aberration squeezes the sky ahead (solid angle ÷ D²), draw 1 in D² points, each D² times
   // brighter: the same light, without hundreds of thousands of points piling onto a few pixels
@@ -126,7 +128,7 @@ void main() {
   vColor = base * dopplerTint(D, T0) * I;
   vSoft = aTemp < 0.0 ? 2.5 : 3.5;
   if (I < 1e-5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
-  gl_PointSize = px * 2.0;
+  gl_PointSize = px * 2.0 * uScale;
   gl_Position = projectionMatrix * viewMatrix * vec4(aberrate(n) * 1000.0, 1.0);
 }`;
 
@@ -143,6 +145,10 @@ void main() {
   else gl_FragColor = vec4(vColor * a, 1.0);
 }`;
 
+// Nearby clouds are drawn as soft blobs up to ~100 px wide: hundreds of millions of fragments a frame.
+// Blobs this wide are smooth, so the big ones go to a half-resolution layer (main.js) and look the same.
+export const GALAXY_SPLIT = { value: 1e9 };   // px; 1e9 = everything at full resolution
+
 function points(arrPos, cols, center, basis, opts) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(arrPos, 3));
@@ -151,7 +157,7 @@ function points(arrPos, cols, center, basis, opts) {
     uniforms: {
       uCenter: { value: new THREE.Vector3() }, uBasis: { value: new THREE.Matrix3() },
       uProj: { value: 1000 }, uGain: { value: opts.gain }, uFade: { value: 1 }, uMaxPx: { value: 48 },
-      uDust: { value: opts.dust ? 1 : 0 }, ...REL,
+      uDust: { value: opts.dust ? 1 : 0 }, uSplit: GALAXY_SPLIT, uLow: { value: 0 }, uScale: { value: 1 }, ...REL,
     },
     vertexShader: VERT, fragmentShader: FRAG, transparent: false, depthTest: false, depthWrite: false,
     // opaque pass (drawn before planets); dust uses alpha blending spelled out as custom blending
@@ -164,6 +170,18 @@ function points(arrPos, cols, center, basis, opts) {
   p.frustumCulled = false;
   p.renderOrder = opts.dust ? -70 : -80;
   p.userData.centerPc = v3.scale(center, 1 / PC);
+  // the same points again on layer 1, drawing only the big soft blobs into the half-resolution layer.
+  // Its alpha keeps the dust's transmission, so the composite darkens what lies behind exactly as before.
+  const low = new THREE.Points(geo, new THREE.ShaderMaterial({
+    uniforms: { ...mat.uniforms, uLow: { value: 1 }, uScale: { value: 0.5 } },
+    vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false, blending: THREE.CustomBlending,
+    blendSrc: opts.dust ? THREE.SrcAlphaFactor : THREE.OneFactor, blendDst: opts.dust ? THREE.OneMinusSrcAlphaFactor : THREE.OneFactor,
+    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: opts.dust ? THREE.OneMinusSrcAlphaFactor : THREE.OneFactor,
+  }));
+  low.layers.set(1);
+  low.frustumCulled = false;
+  low.renderOrder = p.renderOrder;
+  p.add(low);
   return p;
 }
 

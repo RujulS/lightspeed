@@ -27,7 +27,7 @@ const LensShader = {
     uRay: { value: 0 }, uCamBH: { value: new THREE.Vector3() }, uDiskN: { value: new THREE.Vector3(0, 0, 1) },
     uDiskGain: { value: 6.0 }, uTime: { value: 0 }, uBgGain: { value: 2.0 },
     uSpin: { value: 0.9 }, uSpinX: { value: new THREE.Vector3(1, 0, 0) }, uDisk: { value: 1 },
-    uIsco: { value: 6 }, uDiskOut: { value: 24 }, uPeakT: { value: 6000 },
+    uIsco: { value: 6 }, uDiskOut: { value: 16 }, uPeakT: { value: 6000 },
     uPT0: { value: new THREE.Vector4() }, uPT1: { value: new THREE.Vector4() },
   },
   vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -205,7 +205,9 @@ const LensShader = {
         float speed = sqrt(max(kQ + kL * kL + kA2 * kE * kE * u * u, 1e-8));
         float ang = mix(0.12, 0.04, smoothstep(0.01, 0.12, w));                 // smaller turns near the hole
         float h = ang / speed;
-        h = min(h, 0.08 * max(w, 0.002) / max(abs(dw), 1e-8));
+        // w may change by 8% a step, except outbound past r = 50 M, where the path is nearly straight and the
+        // turn-angle cap alone keeps it accurate (no pixel changes by more than 2/255; the trace is ~40% faster)
+        h = min(h, (dw < 0.0 && w < 0.02 ? 1.0 : 0.08) * max(w, 0.002) / max(abs(dw), 1e-8));
         if (dw > 0.0) h = min(h, 0.45 * max(wh - w, 1e-5) / dw);                // never overshoot the horizon
         // Runge–Kutta–Nyström (4th order, three force evaluations)
         float a1 = wAcc(w); vec3 b1 = sAcc(s);
@@ -277,6 +279,16 @@ export function createComposer(renderer, mainScene, probeScene, camera) {
     'vec4 cb = mix( outputColor, texel, alpha ); float m = max( max( cb.r, cb.g ), cb.b ); gl_FragColor = m > 3.0 ? cb * ( 3.0 / m ) : cb;');
   hp.needsUpdate = true;
   composer.addPass(bloom);
-  composer.addPass(new OutputPass());
+  // The bloom is added in the output pass instead of being blended into the frame first: the same sum
+  // (the blend adds rgb × alpha), minus a full-screen write and resolve of the 4×-multisampled buffer.
+  const output = new OutputPass();
+  output.uniforms.tBloom = { value: bloom.renderTargetsHorizontal[0].texture };
+  output.material.fragmentShader = output.material.fragmentShader
+    .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\nuniform sampler2D tBloom;')
+    .replace('gl_FragColor = texture2D( tDiffuse, vUv );',
+      'gl_FragColor = texture2D( tDiffuse, vUv );\n\t\t\tvec4 bl = texture2D( tBloom, vUv );\n\t\t\tgl_FragColor.rgb += bl.rgb * bl.a;');
+  const quad = bloom.fsQuad, draw = quad.render.bind(quad);
+  quad.render = (r) => { if (quad.material !== bloom.blendMaterial) draw(r); };
+  composer.addPass(output);
   return { composer, lens, bloom, mainPass, probePass };
 }
