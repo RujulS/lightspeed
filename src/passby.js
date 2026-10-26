@@ -169,8 +169,10 @@ export class Passbys {
     if (this.queue.length > 1) this.queue.splice(0, this.queue.length - 1);
     if (this.queue.length && !this.active.length) {
       const e = this.queue.shift();
-      this.active.push({ ...e, ...this.basis(ctx), start: wall, dur: FIELD_S });
-      this.onField?.(FIELD_S);
+      // faster than light (warp) the rocks flash past in about a second, like the planets do
+      const dur = ctx.st.beta > 1 ? 1.2 : FIELD_S;
+      this.active.push({ ...e, ...this.basis(ctx), start: wall, dur });
+      this.onField?.(dur);
     }
     for (const a of [...this.active]) {
       const u = (wall - a.start) / a.dur;

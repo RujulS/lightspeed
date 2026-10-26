@@ -227,7 +227,7 @@ async function startMission(destId, probeId, launchT, autoplay = true) {
   passbys.setMission(app.mission, tracker);
   app.flybys = passbys.flybyWindows();
   tracker.setFlybys(app.flybys.map((f) => f.tc));
-  app.defaultFactor = defaultFactor(app.dest, app.mission.t0);
+  app.defaultFactor = Math.min(defaultFactor(app.dest, app.mission.t0), niceRate(Math.max(1, app.mission.tArrive / MIN_CRUISE)));
   radar.setMission(app.mission);
   facts.setMission(app.mission, tracker);
   setFactor(app.defaultFactor);
@@ -589,7 +589,14 @@ let last = performance.now(), hudTimer = 0, wall = 0;
 
 // ---- time flow: one factor for the whole trip (app.factor: per destination, stepped by the user),
 // with three slow-motion moments: liftoff, planet flybys and the final approach.
-const K_LIFT = 0.7, K_ARRIVE = 0.7; // ramps: elapsed (remaining) time grows (shrinks) e-fold per screen second
+const K_LIFT = 0.7, K_ARRIVE = 0.7; // ramps: elapsed (remaining) time grows (shrinks) e-fold per K screen seconds…
+const RAMP_MAX = 8;                  // …faster when needed, so neither ramp takes more than ~8 s
+// The ramps grow time exponentially, so on screen they give every tenfold step in distance about the
+// same time. A trip that is nearly all ramp at the destination's factor (a warp hop) would spend as
+// long leaving the Solar System as crossing the rest of the way; its default factor is lowered so at
+// least MIN_CRUISE screen seconds run at a steady rate, where distance passes evenly.
+const MIN_CRUISE = 30;
+const rampK = (K) => Math.min(K, RAMP_MAX / Math.log(Math.max(Math.E, app.factor)));
 // the clock is a double near (launch + trip) s: each 1/60 s frame must move it by well over its precision
 const floorRate = () => niceUp((Math.abs(app.mission.t0) + app.mission.tArrive) * 2.2e-16 * 60 * 64);
 function orbitRate() {
@@ -600,14 +607,15 @@ function flybyAt(rel) { for (const f of app.flybys) if (rel >= f.t0 && rel < f.t
 function zapAt(rel) { for (const f of app.flybys) if (rel >= f.z0 && rel < f.t0) return f; return null; }
 /** Rough screen time of the whole trip at factor F, slow-motion moments included. */
 function screenTime(F) {
-  const m = app.mission, ramps = (K_LIFT + K_ARRIVE) * Math.log(Math.max(1, (F * 0.7) / floorRate()));
+  const m = app.mission, k = Math.min(K_LIFT, RAMP_MAX / Math.log(Math.max(Math.E, F)));
+  const ramps = 2 * k * Math.log(Math.max(1, (F * k) / floorRate()));
   return m.tArrive / F + ramps + app.flybys.reduce((s, f) => s + (f.t1 - f.t0) / Math.min(F, f.rate) + 0.3, 0);
 }
 /** Time-flow rate (sim s per screen s) rel s after launch, and the moment it belongs to. */
 function phaseAt(rel) {
   const m = app.mission;
   if (rel >= m.tArrive) return { rate: orbitRate(), kind: 'orbit' };
-  const lift = Math.max(1, rel / K_LIFT), arrive = Math.max(1, (m.tArrive - rel) / K_ARRIVE), fb = flybyAt(rel);
+  const lift = Math.max(1, rel / rampK(K_LIFT)), arrive = Math.max(1, (m.tArrive - rel) / rampK(K_ARRIVE)), fb = flybyAt(rel);
   let rate = app.factor, kind = 'cruise';
   if (lift < rate) { rate = lift; kind = 'lift'; }
   if (arrive < rate) { rate = arrive; kind = 'arrive'; }
