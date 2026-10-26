@@ -2,6 +2,8 @@
 
 A 3-D simulation of travelling from Earth to the planets, Pluto, Proxima b, the black hole Gaia BH1 and the Andromeda Galaxy, in real and proposed spacecraft. Voyager 1, Parker Solar Probe, Project Orion, Project Daedalus, Breakthrough Starshot and an ideal antimatter ship are all included. It aims to give a true feel for how long these journeys take and how far they go.
 
+**Live:** https://rujuls.github.io/lightspeed/
+
 Built with [three.js](https://threejs.org) and [Vite](https://vitejs.dev).
 
 ## Run it
