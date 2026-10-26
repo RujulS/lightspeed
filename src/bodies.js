@@ -3,6 +3,7 @@ import { RELATIVITY, REL, NOISE, MESH_ABERRATION } from './shaders/common.js';
 import { SUN_SURFACE } from './sky.js';
 import { ROTATION, radecToVec } from './astro.js';
 import { DAY, v3 } from './constants.js';
+import { loadTexture } from './textures.js';
 
 const VERT_HEAD = /* glsl */ `
 #include <common>
@@ -228,7 +229,6 @@ const PLANET_LOOK = {
   proximab: { proc: 2, atmo: [0.55, 0.65, 1.0], s: 0.35 },
 };
 
-const loader = new THREE.TextureLoader();
 const texCache = {};
 const texPending = [];
 /** Resolves once every planet texture requested so far has loaded. */
@@ -237,12 +237,15 @@ function tex(name, srgb = true) {
   if (!texCache[name]) {
     let done;
     texPending.push(new Promise((r) => (done = r)));
-    const t = loader.load('textures/' + name, done, undefined, done);
-    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-    t.anisotropy = 8;
-    texCache[name] = t;
+    texCache[name] = loadTexture('textures/' + name, { srgb, done });
   }
   return texCache[name];
+}
+/** Start every planet map downloading at once (the planets themselves are built later). */
+export function preloadTextures() {
+  for (const look of Object.values(PLANET_LOOK)) if (look.map) tex(look.map);
+  for (const name of ['8k_earth_nightmap.jpg', '8k_saturn_ring_alpha.png', '8k_sun.jpg']) tex(name);
+  for (const name of ['earth_specular.jpg', 'earth_normal.png', '8k_earth_clouds.jpg']) tex(name, false);
 }
 const blank = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
 blank.needsUpdate = true;

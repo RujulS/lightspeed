@@ -6,7 +6,8 @@ import { destById, RADIUS, PROXIMA, PROXIMA_PC, PROXIMA_B, GAIA_BH1, bh1Companio
 import { REL, setObserverVelocity } from './shaders/common.js';
 import { createPanorama, createStarfield } from './sky.js';
 import { createGalaxies, updateGalaxy, M31_GROUP, GALAXY_SPLIT } from './galaxies.js';
-import { Planet, Star, bbColorJS, texturesReady } from './bodies.js';
+import { Planet, Star, bbColorJS, texturesReady, preloadTextures } from './bodies.js';
+import { loadTextureAsync, useRenderer } from './textures.js';
 import { WorldLine } from './lines.js';
 import { MoonSystem } from './moons.js';
 import { ProbeModel } from './probes3d.js';
@@ -27,6 +28,7 @@ renderer.setPixelRatio(DPR);
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
+useRenderer(renderer);
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.004, 1e16);
 const scene = new THREE.Scene();
@@ -37,14 +39,17 @@ const SQZ = 4e13; // beyond this, meshes are pulled in along the line of sight a
 
 // ============================================================================ world objects
 const loadText = (s) => { $('loadtext').textContent = s; };
-const texLoader = new THREE.TextureLoader();
-const skyTex = await texLoader.loadAsync('textures/milkyway_eq.jpg');
+// every download starts now, in parallel; the galaxies and planets are built while they arrive
+const skyTexP = loadTextureAsync('textures/milkyway_eq.jpg');
+const starBufP = fetch('data/stars.bin').then((r) => r.arrayBuffer());
+preloadTextures();
+const skyTex = await skyTexP;
 const panorama = createPanorama(skyTex);
 scene.add(panorama);
 lens.uniforms.tSky.value = skyTex;
 
 loadText('Placing 109,000 stars…');
-const starBuf = await (await fetch('data/stars.bin')).arrayBuffer();
+const starBuf = await starBufP;
 const stars = createStarfield(starBuf, [[0, 0, 0], PROXIMA_PC]);
 scene.add(stars);
 
@@ -171,10 +176,7 @@ const skyLight = new THREE.DirectionalLight(0xbfd4ff, 0);
 probeScene.add(skyLight, skyLight.target);
 probeScene.add(new THREE.AmbientLight(0x8899bb, 0.06));
 const pmrem = new THREE.PMREMGenerator(renderer);
-const envTex = skyTex.clone();
-envTex.mapping = THREE.EquirectangularReflectionMapping;
-envTex.colorSpace = THREE.SRGBColorSpace;
-probeScene.environment = pmrem.fromEquirectangular(envTex).texture;
+probeScene.environment = pmrem.fromEquirectangular(skyTex).texture; // the sky map itself: a clone would upload 8k again
 probeScene.environmentIntensity = 0.35;
 const probeRoot = new THREE.Group();
 probeScene.add(probeRoot);
@@ -263,9 +265,14 @@ function aimOrbit(o) {
 }
 // Smooth view changes: from now on the camera's direction, distance and roll glide from the current
 // pose to the new view over dur seconds, instead of each easing at its own speed.
+// The start pose is kept relative to what the camera was centred on, so a blend that also moves the
+// centre (ship → black hole) starts where the camera really is, instead of that offset from the new centre.
 function startBlend(dur) {
   if (!app.camU) return;
-  ctl.blend = { dir: v3.norm(OFF), up: app.camUp || app.camU, dist: v3.len(OFF), start: wall, dur };
+  ctl.blend = { off: OFF.slice(), focus: ctl.focus, up: app.camUp || app.camU, start: wall, dur };
+}
+function focusPos(id, st, m) {
+  return id === 'probe' ? st.pos : id === 'earth' ? planetPos('earth', app.t) : m.dest.pos(app.t);
 }
 function slerpV(a, b, t) {
   const th = Math.acos(Math.max(-1, Math.min(1, v3.dot(a, b))));
@@ -652,7 +659,7 @@ function frame(now) {
   const rMin = focusRadius() * 1.15;
   ctl.tDist = Math.max(rMin, Math.min(ctl.tDist, 3e22));
   ctl.dist = ctl.blend ? ctl.tDist : Math.exp(Math.log(ctl.dist) + (Math.log(ctl.tDist) - Math.log(ctl.dist)) * k);
-  const focusW = ctl.focus === 'probe' ? st.pos : ctl.focus === 'earth' ? planetPos('earth', app.t) : m.dest.kind === 'planet' || m.dest.kind === 'star' ? m.dest.pos(app.t) : m.dest.pos(app.t);
+  const focusW = focusPos(ctl.focus, st, m);
   let up = ECLIPTIC_NORTH;
   let f = ctl.mode === 'chase' && ctl.focus === 'probe' ? (st.beta > 0 ? v3.norm(st.vel) : m.dir || v3.norm(v3.sub(m.dest.pos(app.t), st.pos))) : [1, 0, 0];
   if (ctl.mode === 'cine' && ctl.focus === 'probe') f = app.cineL;
@@ -673,8 +680,9 @@ function frame(now) {
   let camUp = u;
   if (ctl.blend) {
     const b = ctl.blend, e0 = Math.min(1, (wall - b.start) / b.dur), e = e0 * e0 * (3 - 2 * e0);
-    const dir = slerpV(b.dir, v3.norm(off), e);
-    off = v3.scale(dir, Math.exp(Math.log(b.dist) + (Math.log(v3.len(off)) - Math.log(b.dist)) * e));
+    const s0 = b.focus === ctl.focus ? b.off : v3.add(v3.sub(focusPos(b.focus, st, m), focusW), b.off);
+    const dir = slerpV(v3.norm(s0), v3.norm(off), e), d0 = v3.len(s0);
+    off = v3.scale(dir, Math.exp(Math.log(d0) + (Math.log(v3.len(off)) - Math.log(d0)) * e));
     const uu = slerpV(b.up, u, e);
     camUp = v3.norm(v3.sub(uu, v3.scale(dir, v3.dot(uu, dir))));
     if (e0 >= 1) ctl.blend = null;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { loadTexture } from './textures.js';
 import { RELATIVITY, REL } from './shaders/common.js';
 
 // Andromeda (M31) as a photographic "galaxy card": a real ground-based image (Adam Evans, CC BY 2.0)
@@ -40,9 +41,7 @@ void main() {
 let TEX = null;
 function texture() {
   if (!TEX) {
-    TEX = new THREE.TextureLoader().load('textures/m31_card.jpg');
-    TEX.colorSpace = THREE.SRGBColorSpace;
-    TEX.anisotropy = 8;
+    TEX = loadTexture('textures/m31_card.jpg');
   }
   return TEX;
 }

@@ -125,8 +125,10 @@ export class Menu {
     $('m-probes').innerHTML = PROBES.map((p) => {
       const top = p.kind === 'cruise' ? p.v / 1e3 + ' km/s' : p.kind === 'ballistic' ? p.cruise / 1e3 + ' km/s'
         : p.stages.at(-1).beta >= 1 ? '→ c' : (p.stages.at(-1).beta * 100).toFixed(1) + '% c';
-      return `<button class="m-item" data-p="${p.id}"><div class="row"><span class="nm">${p.name}</span><span class="dd">${top}</span></div><span class="tg">${p.tag}</span></button>`;
+      return `<button class="m-item" data-p="${p.id}"><div class="row"><span class="nm">${p.name}</span><span class="dd">${top}</span></div>`
+        + `<div class="row"><span class="tg">${p.tag}</span><span class="tt"></span></div></button>`;
     }).join('');
+    this.rankKey = null;
     $('m-dests').onclick = (e) => { const b = e.target.closest('[data-d]'); if (b) { this.dest = b.dataset.d; this.select('dest'); } };
     $('m-probes').onclick = (e) => { const b = e.target.closest('[data-p]'); if (b) { this.probe = b.dataset.p; this.select('probe'); } };
   }
@@ -143,11 +145,31 @@ export class Menu {
     this.refresh(kind);
   }
 
+  // The spacecraft are listed by how soon each reaches the chosen destination. On short hops
+  // acceleration matters more than top speed (Daedalus builds up speed at only 0.03 g), so the order
+  // changes from one destination to the next; the list slides into its new order.
+  rankProbes(d, t) {
+    const key = d.id + ':' + t;
+    if (this.rankKey === key) return;
+    this.rankKey = key;
+    const trip = {};
+    for (const p of PROBES) { const m = new Mission(p, d, t, null); trip[p.id] = m.t0 - t + m.tArrive; }
+    const list = $('m-probes'), items = [...list.children];
+    const before = new Map(items.map((b) => [b, b.getBoundingClientRect().top]));
+    items.sort((a, b) => trip[a.dataset.p] - trip[b.dataset.p]);
+    for (const b of items) { b.querySelector('.tt').textContent = fmtTime(trip[b.dataset.p]); list.appendChild(b); }
+    for (const b of items) {
+      const dy = before.get(b) - b.getBoundingClientRect().top;
+      if (dy) b.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 350, easing: 'cubic-bezier(.2, .7, .2, 1)' });
+    }
+  }
+
   refresh(kind) {
     const d = DESTINATIONS.find((x) => x.id === this.dest), p = PROBES.find((x) => x.id === this.probe);
     const t = this.launchT();
     const m = new Mission(p, d, t, null);
     const dist = v3.len(v3.sub(d.pos(t), planetPos('earth', t)));
+    this.rankProbes(d, t);
     $('m-dest-group').textContent = d.group;
     $('m-dest-name').textContent = d.name;
     $('m-dest-sub').textContent = `${fmtDist(dist)} from Earth`;

@@ -117,9 +117,9 @@ export class Passbys {
         e.rate = niceRate(Math.max(1, (PASS * R) / v));
       }
       const tb = tracker.cross((t) => v3.len(pos(t)), 2.7 * AU);
-      if (tb && !['mars', 'mercury', 'venus'].includes(dest)) ev.push({ t: tb - m.t0, kind: 'field', field: this.belt, name: 'Asteroid belt' });
+      if (tb && !['mars', 'mercury', 'venus'].includes(dest)) ev.push({ t: tb - m.t0, kind: 'field', field: this.belt, name: 'Asteroid belt', r: 2.7 * AU });
       const to = tracker.cross((t) => v3.len(pos(t)), 2000 * AU);
-      if (to) ev.push({ t: to - m.t0, kind: 'field', field: this.oort, name: 'Oort cloud' });
+      if (to) ev.push({ t: to - m.t0, kind: 'field', field: this.oort, name: 'Oort cloud', r: 2000 * AU });
     }
     this.events = ev.sort((a, b) => a.t - b.t);
     this.next = 0; this.queue = [];
@@ -163,7 +163,8 @@ export class Passbys {
     const wall = clock;
     while (this.next < this.events.length && this.events[this.next].t <= rel) {
       const e = this.events[this.next++];
-      if (e.kind === 'field') this.queue.push(e);
+      // a field the ship has long left behind (the timeline jumped past it) is skipped, not played late
+      if (e.kind === 'field' && v3.len(ctx.st.pos) < 2 * e.r) this.queue.push(e);
     }
     if (this.queue.length > 1) this.queue.splice(0, this.queue.length - 1);
     if (this.queue.length && !this.active.length) {
