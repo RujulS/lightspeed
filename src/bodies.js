@@ -230,22 +230,28 @@ const PLANET_LOOK = {
 };
 
 const texCache = {};
-const texPending = [];
-/** Resolves once every planet texture requested so far has loaded. */
-export const texturesReady = () => Promise.all(texPending);
-function tex(name, srgb = true) {
+const texWhen = {};
+let texLoaded = 0;
+/** [maps loaded, maps requested] */
+export const textureProgress = () => [texLoaded, Object.keys(texCache).length];
+function tex(name, srgb = true, priority = 'low') {
   if (!texCache[name]) {
     let done;
-    texPending.push(new Promise((r) => (done = r)));
-    texCache[name] = loadTexture('textures/' + name, { srgb, done });
+    texWhen[name] = new Promise((r) => (done = r));
+    texCache[name] = loadTexture('textures/' + name, { srgb, priority, done: () => { texLoaded++; done(); } });
   }
   return texCache[name];
 }
-/** Start every planet map downloading at once (the planets themselves are built later). */
-export function preloadTextures() {
-  for (const look of Object.values(PLANET_LOOK)) if (look.map) tex(look.map);
-  for (const name of ['8k_earth_nightmap.jpg', '8k_saturn_ring_alpha.png', '8k_sun.jpg']) tex(name);
-  for (const name of ['earth_specular.jpg', 'earth_normal.png', '8k_earth_clouds.jpg']) tex(name, false);
+// maps each planet uses; the data maps (not colours) are loaded without sRGB decoding
+const DATA_MAPS = new Set(['earth_specular.jpg', 'earth_normal.png', '8k_earth_clouds.jpg']);
+function mapsOf(look) {
+  return [look.map, ...(look.earth ? ['8k_earth_nightmap.jpg', ...DATA_MAPS] : []), ...(look.ring ? ['8k_saturn_ring_alpha.png'] : [])].filter(Boolean);
+}
+/** Start every planet map downloading at once, the first planet's ahead of the rest. */
+export function preloadTextures(first) {
+  for (const name of mapsOf(PLANET_LOOK[first])) tex(name, !DATA_MAPS.has(name), 'high');
+  for (const look of Object.values(PLANET_LOOK)) for (const name of mapsOf(look)) tex(name, !DATA_MAPS.has(name));
+  tex('8k_sun.jpg');
 }
 const blank = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
 blank.needsUpdate = true;
@@ -291,6 +297,9 @@ export class Planet {
       ...REL,
     };
     this.uniforms = uniforms;
+    // true once every map this planet uses has arrived (the menu waits for it before showing the planet)
+    this.ready = false;
+    Promise.all(mapsOf(look).map((n) => (tex(n, !DATA_MAPS.has(n)), texWhen[n]))).then(() => { this.ready = true; });
     const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: PLANET_VERT, fragmentShader: PLANET_FRAG, defines: look.earth ? { EARTH: 1 } : {} });
     const sphere = look.lo ? SPHERE_LO : SPHERE;
     this.mesh = new THREE.Mesh(sphere, mat);

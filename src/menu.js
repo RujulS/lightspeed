@@ -293,7 +293,9 @@ export class Menu {
     this.probeRoot.position.copy(this.at(...this.cur.p));
 
     const o = this.previews[this.dest];
-    if (o) {
+    // a planet stays hidden until its maps have arrived (they stream in after the menu opens)
+    if (o) o.visible = !o.userData.planet || o.userData.planet.ready;
+    if (o?.visible) {
       o.userData.appear = Math.min(1, (o.userData.appear || 0) + dt * 1.6);
       const s = 0.85 + 0.15 * easeOut(o.userData.appear);
       o.scale.setScalar(s);

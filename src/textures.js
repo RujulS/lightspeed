@@ -46,7 +46,7 @@ function upload(t, bitmap, srgb) {
 }
 
 /** A texture that fills in when its image arrives; done(texture) is called on load or on error. */
-export function loadTexture(url, { srgb = true, anisotropy = 8, done } = {}) {
+export function loadTexture(url, { srgb = true, anisotropy = 8, priority = 'auto', done } = {}) {
   const t = new THREE.Texture();
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   t.anisotropy = anisotropy;
@@ -56,7 +56,7 @@ export function loadTexture(url, { srgb = true, anisotropy = 8, done } = {}) {
       plain.load(url, (img) => { t.image = img.image; t.needsUpdate = true; done?.(t); }, undefined, fail);
       return;
     }
-    fetch(url)
+    fetch(url, { priority })
       .then((r) => (r.ok ? r.blob() : Promise.reject(r.status)))
       .then((b) => createImageBitmap(b, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: srgb ? 'default' : 'none' }))
       .then((bm) => {

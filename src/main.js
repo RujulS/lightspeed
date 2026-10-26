@@ -6,8 +6,8 @@ import { destById, RADIUS, PROXIMA, PROXIMA_PC, PROXIMA_B, GAIA_BH1, bh1Companio
 import { REL, setObserverVelocity } from './shaders/common.js';
 import { createPanorama, createStarfield } from './sky.js';
 import { createGalaxies, updateGalaxy, M31_GROUP, GALAXY_SPLIT } from './galaxies.js';
-import { Planet, Star, bbColorJS, texturesReady, preloadTextures } from './bodies.js';
-import { loadTextureAsync, useRenderer } from './textures.js';
+import { Planet, Star, bbColorJS, textureProgress, preloadTextures } from './bodies.js';
+import { loadTexture, loadTextureAsync, useRenderer } from './textures.js';
 import { WorldLine } from './lines.js';
 import { MoonSystem } from './moons.js';
 import { ProbeModel } from './probes3d.js';
@@ -39,11 +39,14 @@ const SQZ = 4e13; // beyond this, meshes are pulled in along the line of sight a
 
 // ============================================================================ world objects
 const loadText = (s) => { $('loadtext').textContent = s; };
-// every download starts now, in parallel; the galaxies and planets are built while they arrive
-const skyTexP = loadTextureAsync('textures/milkyway_eq.jpg');
-const starBufP = fetch('data/stars.bin').then((r) => r.arrayBuffer());
-preloadTextures();
-const skyTex = await skyTexP;
+// Every download starts now, in parallel, and the galaxies and planets are built while they arrive. The
+// menu opens once its own few files are in; the full 8k sky (21 MB) and the other planets' maps stream
+// in behind it, and "Continue to launch pad" waits for them (assetsReady).
+let skyLoaded = false;
+const skyTex = loadTexture('textures/milkyway_eq.jpg', { priority: 'low', done: () => { skyLoaded = true; } });
+const envSkyP = loadTextureAsync('textures/milkyway_eq_2k.jpg', { priority: 'high' }); // menu lighting until then
+const starBufP = fetch('data/stars.bin', { priority: 'high' }).then((r) => r.arrayBuffer());
+preloadTextures('saturn'); // the menu opens on Saturn
 const panorama = createPanorama(skyTex);
 scene.add(panorama);
 lens.uniforms.tSky.value = skyTex;
@@ -176,7 +179,9 @@ const skyLight = new THREE.DirectionalLight(0xbfd4ff, 0);
 probeScene.add(skyLight, skyLight.target);
 probeScene.add(new THREE.AmbientLight(0x8899bb, 0.06));
 const pmrem = new THREE.PMREMGenerator(renderer);
-probeScene.environment = pmrem.fromEquirectangular(skyTex).texture; // the sky map itself: a clone would upload 8k again
+// lit from a 2k copy of the sky while the menu is up; assetsReady() swaps in the full map before launch
+const envLow = pmrem.fromEquirectangular(await envSkyP);
+probeScene.environment = envLow.texture;
 probeScene.environmentIntensity = 0.35;
 const probeRoot = new THREE.Group();
 probeScene.add(probeRoot);
@@ -415,7 +420,12 @@ const radar = new Radar($('radar'), $('radar-big'));
 const passbys = new Passbys(probeScene, scene);
 const menu = new Menu({
   panorama, stars, envMap: probeScene.environment, canvas,
-  onContinue: async (d, p, t) => { menu.show(false); await prepareLaunch(d, p, t); },
+  onContinue: async () => {
+    await assetsReady();
+    if (!menu.visible) return;
+    menu.show(false);
+    await prepareLaunch(menu.dest, menu.probe, menu.launchT());
+  },
 });
 function showRunUI(v) { for (const id of ['hud', 'tools', 'missionbar', 'mappanel']) $(id).classList.toggle('hidden', !v); if (!v) $('radar-big').classList.add('hidden'); layoutTop(); }
 // Keep the top-centre readout clear of the top-right buttons: measured, not a fixed breakpoint, since
@@ -432,6 +442,26 @@ function layoutTop() {
   const card = innerWidth - 16 - 300 < h.right + 12 ? Math.round(top + h.height + 12) : 64;
   if (hud._card !== card) { hud._card = card; $('arrive').style.top = `${card}px`; }
 }
+
+// Before the first launch every map must be in: the button shows the progress meanwhile (the 8k sky
+// counts as eight maps, roughly its share of the bytes). Then the spacecraft are lit from the full sky,
+// whose reflections are a little sharper than the 2k copy's.
+const LAUNCH_LABEL = $('b-launch').innerHTML;
+let assetsP = null;
+const assetsReady = () => (assetsP ||= (async () => {
+  const btn = $('b-launch');
+  for (;;) {
+    const [n, of] = textureProgress();
+    if (n >= of && skyLoaded) break;
+    btn.disabled = true;
+    btn.textContent = `Loading maps… ${Math.floor((100 * (n + (skyLoaded ? 8 : 0))) / (of + 8))}%`;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  btn.disabled = false; btn.innerHTML = LAUNCH_LABEL;
+  const env = pmrem.fromEquirectangular(skyTex).texture; // the sky map itself: a clone would upload 8k again
+  for (const s of [probeScene, menu.scene, menu.probeScene]) s.environment = env;
+  envLow.dispose();
+})());
 
 async function prepareLaunch(d, p, t) {
   await startMission(d, p, t, false);
@@ -1042,7 +1072,6 @@ async function warmUp() {
   };
   const mainTmp = parked(await Promise.all(PROBES.map((p) => getModel(p.id))), probeScene);
   const menuTmp = parked(await menu.preloadAll(), menu.probeScene);
-  await texturesReady();
   for (const [s, c] of [[scene, camera], [probeScene, camera], [menu.scene, menu.camera], [menu.probeScene, menu.camera]]) {
     const hidden = [];
     const texs = new Set();
