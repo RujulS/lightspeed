@@ -597,8 +597,10 @@ const RAMP_MAX = 8;                  // …faster when needed, so neither ramp t
 // least MIN_CRUISE screen seconds run at a steady rate, where distance passes evenly.
 const MIN_CRUISE = 30;
 const rampK = (K) => Math.min(K, RAMP_MAX / Math.log(Math.max(Math.E, app.factor)));
-// the clock is a double near (launch + trip) s: each 1/60 s frame must move it by well over its precision
-const floorRate = () => niceUp((Math.abs(app.mission.t0) + app.mission.tArrive) * 2.2e-16 * 60 * 64);
+// the clock is a double near (launch + elapsed) s: each 1/60 s frame must move it by well over its
+// precision. Only where the clock is now matters, so on a billion-year trip the flybys near its start
+// still get their slow motion.
+const floorRate = (rel = app.mission.tArrive) => niceUp((Math.abs(app.mission.t0) + Math.max(0, rel)) * 2.2e-16 * 60 * 64);
 function orbitRate() {
   const P = app.mission.orbit?.P;
   return Math.max(floorRate(), isFinite(P) ? niceRate(Math.max(1, P / 80)) : 1);
@@ -608,7 +610,7 @@ function zapAt(rel) { for (const f of app.flybys) if (rel >= f.z0 && rel < f.t0)
 /** Rough screen time of the whole trip at factor F, slow-motion moments included. */
 function screenTime(F) {
   const m = app.mission, k = Math.min(K_LIFT, RAMP_MAX / Math.log(Math.max(Math.E, F)));
-  const ramps = 2 * k * Math.log(Math.max(1, (F * k) / floorRate()));
+  const ramps = 2 * k * Math.log(Math.max(1, (F * k) / floorRate(0)));
   return m.tArrive / F + ramps + app.flybys.reduce((s, f) => s + (f.t1 - f.t0) / Math.min(F, f.rate) + 0.3, 0);
 }
 /** Time-flow rate (sim s per screen s) rel s after launch, and the moment it belongs to. */
@@ -622,7 +624,7 @@ function phaseAt(rel) {
   if (fb && fb.rate < rate) { rate = fb.rate; kind = 'flyby'; }
   const zap = zapAt(rel); // the planet rushing in: still far faster than the pass, but visible
   if (zap && zap.zrate < rate) rate = zap.zrate;
-  return { rate: Math.max(rate, floorRate()), kind, fly: kind === 'flyby' ? fb : null };
+  return { rate: Math.max(rate, floorRate(rel)), kind, fly: kind === 'flyby' ? fb : null };
 }
 const rateAt = (rel) => phaseAt(rel).rate;
 // advance by dt of screen time, stopping exactly at flyby edges and the arrival so that even a very

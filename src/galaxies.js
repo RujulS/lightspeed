@@ -141,7 +141,8 @@ void main() {
   float r2 = dot(c, c);
   if (r2 > 1.0) discard;
   float a = exp(-r2 * vSoft);
-  if (uDust > 0.5) gl_FragColor = vec4(vec3(0.05, 0.03, 0.02), a * min(vColor.r, 1.0));
+  // dust only absorbs: it dims what lies behind it and adds no light (against empty sky it is invisible)
+  if (uDust > 0.5) gl_FragColor = vec4(vec3(0.0), a * min(vColor.r, 1.0));
   else gl_FragColor = vec4(vColor * a, 1.0);
 }`;
 
