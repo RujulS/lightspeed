@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lightspeed — A to B across the cosmos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="labels"></div>
+
+  <div id="loading"><div class="ring"></div><div id="loadtext">Loading the universe…</div></div>
+
+  <!-- ============================================================ main menu -->
+  <section id="menu" class="hidden">
+    <header class="m-brand"><span>LIGHTSPEED</span><em>Journeys at the speed limit of the universe</em></header>
+    <aside class="m-col m-left"><h4>Destination</h4><div id="m-dests"></div></aside>
+    <aside class="m-col m-right"><h4>Spacecraft</h4><div id="m-probes"></div></aside>
+    <div class="m-center">
+      <div class="m-info">
+        <div class="m-card" id="m-dest-card">
+          <small id="m-dest-group"></small>
+          <h2 id="m-dest-name"></h2>
+          <p class="m-sub" id="m-dest-sub"></p>
+          <p class="m-desc" id="m-dest-desc"></p>
+        </div>
+        <div class="m-card m-card-r" id="m-probe-card">
+          <small id="m-probe-tag"></small>
+          <h2 id="m-probe-name"></h2>
+          <p class="m-sub" id="m-probe-sub"></p>
+          <p class="m-desc" id="m-blurb"></p>
+        </div>
+      </div>
+      <div class="m-trip">
+        <div><label>Trip time</label><b id="m-trip">—</b></div>
+        <div id="m-aboard-box"><label>Felt aboard</label><b id="m-aboard">—</b></div>
+        <div><label>Light takes</label><b id="m-light">—</b></div>
+        <div><label>Top speed</label><b id="m-top">—</b></div>
+      </div>
+      <div class="m-actions">
+        <label class="m-date">Launch <input id="i-date" type="date" /></label>
+        <button id="b-launch" class="cta">Continue to launch pad <span>→</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ HUD: the two numbers that matter -->
+  <section id="hud" class="hidden">
+    <div class="h-route"><span id="h-probe">—</span><i>·</i>Earth<i>→</i><span id="h-dest">—</span></div>
+    <div class="h-big">
+      <div class="h-num"><label>Speed</label><div class="h-val"><b id="h-speed">0</b><span id="h-speed-unit">km/s</span></div><small id="h-speed-sub"></small></div>
+      <div class="h-sep"></div>
+      <div class="h-num"><label>Time elapsed</label><div class="h-val"><b id="h-time">0</b><span id="h-time-unit"></span></div><small id="h-time-sub"></small></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ tools -->
+  <nav id="tools" class="hidden">
+    <button id="b-new" class="ghost">‹ Menu</button>
+    <div class="seg" id="seg-cam" title="Camera (C)"><button data-v="cine" class="on" title="Frames planets and moons as they pass; otherwise looks ahead to the destination">Cinematic</button><button data-v="chase">Chase</button><button data-v="orbit">Orbit</button></div>
+    <div class="seg" id="seg-focus"><button data-v="probe" class="on">Ship</button><button data-v="dest">Destination</button><button data-v="earth">Earth</button></div>
+    <button id="b-orbits" class="tog on" title="Planet orbits &amp; flight path (O)">Paths</button>
+    <button id="b-moons" class="tog on" title="Moons of the planets (M)">Moons</button>
+    <button id="b-labels" class="tog on" title="Labels (L)">Labels</button>
+    <button id="b-disk" class="tog on hidden" title="Show an accretion disk">Disk</button>
+    <button id="b-info" class="tog" title="About &amp; credits">i</button>
+  </nav>
+
+  <!-- ============================================================ mission bar (distance, stages, time flow) -->
+  <footer id="missionbar" class="panel hidden">
+    <button id="b-play" class="round" title="Play / pause (space)">❚❚</button>
+    <div class="mb-main">
+      <div class="mb-top">
+        <span><b id="trk-el">0 km</b> travelled · <span class="mb-pct" id="trk-pct">0%</span></span>
+        <div class="seg seg-sm" id="seg-scale" title="True: distances to scale. Mix: in between. Even: landmarks evenly spaced."><button data-v="true" class="on">True</button><button data-v="mix">Mix</button><button data-v="even">Even</button></div>
+        <span><b id="trk-rem">—</b> to go</span>
+      </div>
+      <canvas id="trk-map"></canvas>
+      <ol id="trk-stages"></ol>
+    </div>
+    <div class="mb-time">
+      <label>Time flow</label>
+      <div class="tf-rate" id="tf-rate">Real time</div>
+      <div class="tf-gear" id="tf-gear">—</div>
+      <div class="tf-ctl"><button id="tf-slow" title="Slow time down">‹</button><button id="tf-reset" class="on" title="Back to the default for this destination">Reset</button><button id="tf-fast" title="Speed time up">›</button></div>
+      <div class="tf-set" id="tf-set"></div>
+    </div>
+  </footer>
+
+  <!-- ============================================================ map -->
+  <section id="mappanel" class="panel hidden">
+    <div class="mp-head"><span>Map</span><em id="mp-sub">Sun at centre</em></div>
+    <canvas id="radar" title="Click to enlarge"></canvas>
+    <div class="mp-foot" id="mp-foot"></div>
+  </section>
+  <canvas id="radar-big" class="panel hidden" title="Click to close"></canvas>
+
+  <!-- ============================================================ launch pad -->
+  <section id="launchpad" class="panel hidden">
+    <div class="lp-text"><small>Launch pad · Earth orbit, 2,500 km up</small><div class="lp-title" id="lp-title">Ready</div><div class="lp-sub" id="lp-sub"></div></div>
+    <button id="b-go" class="cta">Launch</button>
+  </section>
+  <div id="countdown" class="hidden"></div>
+
+  <!-- ============================================================ facts & arrival -->
+  <div id="fact" class="hidden"><small id="fact-tag"></small><p id="fact-text"></p></div>
+  <section id="arrive" class="panel hidden"></section>
+
+  <section id="info" class="panel hidden">
+    <h2>How this works</h2>
+    <p><b>Planets</b> sit at their real positions for the simulated date (JPL orbital elements) and spin at their IAU rotation rates. <b>Voyager-class</b> trips inside the Solar System fly real two-body transfer orbits with a launch-window search.</p>
+    <p><b>Fast ships</b> follow exact special-relativistic motion: constant acceleration, coasting, flip-and-burn braking. Ship clocks run slow.</p>
+    <p><b>What you see at high speed is physical.</b> Starlight crowds toward the direction of travel and stars ahead turn bluer and brighter. At extreme speed the Big Bang's afterglow ahead shifts into visible light.</p>
+    <p><b>Stars</b>: 109,000 real stars at their 3-D positions. <b>Gaia BH1</b> bends light by exact Schwarzschild ray tracing. The real Gaia BH1 is dormant; its glowing disk is an optional "what if it were feeding" view.</p>
+    <h3>Credits</h3>
+    <p class="small">Planet textures: Solar System Scope (CC BY 4.0). Milky Way: NASA/Goddard SVS Deep Star Maps 2020. Voyager &amp; Parker models: NASA 3D Resources. Star catalogue: HYG Database v4.1 (CC BY-SA 4.0). Andromeda photo: Adam Evans (CC BY 2.0), foreground stars removed and mounted at M31's true position, size and orientation. The Milky Way is built from published structural measurements. Black hole disk modelled after SkyWalkerPS/kerr-black-hole. Orion, Daedalus, Starshot and the antimatter ship are reconstructions from their design studies.</p>
+    <button id="b-info-close" class="ghost">Close</button>
+  </section>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
