@@ -8,7 +8,7 @@ import { createPanorama, createStarfield } from './sky.js';
 import { createGalaxies, updateGalaxy, M31_GROUP, GALAXY_SPLIT } from './galaxies.js';
 import { Planet, Star, bbColorJS, textureProgress, preloadTextures } from './bodies.js';
 import { loadTexture, loadTextureAsync, useRenderer } from './textures.js';
-import { Sound } from './audio.js';
+import { Sound, EFFECTS } from './audio.js';
 import { WorldLine } from './lines.js';
 import { MoonSystem } from './moons.js';
 import { ProbeModel } from './probes3d.js';
@@ -527,7 +527,12 @@ addEventListener('pointerdown', (e) => { if (!e.target.closest('#tools')) openPo
 function syncSound() {
   for (const [id, on] of [['b-sfx', sound.sfxOn], ['b-music-on', sound.musicOn]]) { $(id).classList.toggle('on', on); $(id).textContent = on ? 'On' : 'Off'; }
   $('i-volume').value = sound.volume;
+  $('sfx-levels').classList.toggle('off', !sound.sfxOn);
 }
+// one volume slider per effect
+$('sfx-levels').innerHTML = EFFECTS.map(([id, name]) =>
+  `<div class="pop-row"><label for="lv-${id}">${name}</label><input id="lv-${id}" data-fx="${id}" type="range" min="0" max="1" step="0.05" value="${sound.levels[id]}" /></div>`).join('');
+$('sfx-levels').oninput = (e) => { if (e.target.dataset.fx) sound.setLevel(e.target.dataset.fx, +e.target.value); };
 function renderTracks() {
   const box = $('music-tracks');
   box.innerHTML = sound.tracks.length

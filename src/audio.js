@@ -8,12 +8,16 @@ const store = {
   set(k, v) { try { localStorage.setItem('ls-' + k, JSON.stringify(v)); } catch { /* private mode etc. */ } },
 };
 
+/** The effects, each with its own volume: [id, label]. */
+export const EFFECTS = [['countdown', 'Countdown'], ['ignition', 'Ignition'], ['engine', 'Engine'], ['flyby', 'Flybys'], ['rocks', 'Rock fields'], ['arrival', 'Arrival']];
+
 export class Sound {
   constructor() {
     this.sfxOn = store.get('sfx', true);
     this.musicOn = store.get('music', false);
     this.track = store.get('track', null);
     this.volume = store.get('volume', 0.6);
+    this.levels = { ...Object.fromEntries(EFFECTS.map(([id]) => [id, 1])), ...store.get('levels', {}) };
     this.tracks = [];
     this.ctx = null;
     this.audio = new Audio();
@@ -39,6 +43,8 @@ export class Sound {
     this.sfx = ctx.createGain();
     this.sfx.gain.value = this.sfxOn ? 1 : 0;
     this.sfx.connect(this.out);
+    this.bus = {}; // one gain per effect, all into the effects master
+    for (const [id] of EFFECTS) { const g = (this.bus[id] = ctx.createGain()); g.gain.value = this.levels[id]; g.connect(this.sfx); }
     this.music = ctx.createGain();
     this.music.gain.value = 0;
     ctx.createMediaElementSource(this.audio).connect(this.music);
@@ -59,7 +65,7 @@ export class Sound {
     humGain.gain.value = 0.25;
     src.connect(lp).connect(this.drone);
     hum.connect(humGain).connect(this.drone);
-    this.drone.connect(this.sfx);
+    this.drone.connect(this.bus.engine);
     src.start(); hum.start();
     this.ready.then(() => this.updateMusic());
   }
@@ -80,6 +86,10 @@ export class Sound {
   setMusic(on) { this.musicOn = on; store.set('music', on); this.start(); this.updateMusic(); }
   setTrack(file) { this.track = file; store.set('track', file); this.start(); this.updateMusic(true); }
   setVolume(v) { this.volume = v; store.set('volume', v); this.updateMusic(); }
+  setLevel(id, v) {
+    this.levels[id] = v; store.set('levels', this.levels);
+    if (this.ctx) this.bus[id].gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+  }
 
   updateMusic(restart = false) {
     if (!this.ctx) return;
@@ -116,7 +126,7 @@ export class Sound {
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(0.18, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + (last ? 0.5 : 0.18));
-    o.connect(g).connect(this.sfx);
+    o.connect(g).connect(this.bus.countdown);
     o.start(t); o.stop(t + 0.6);
   }
 
@@ -134,7 +144,7 @@ export class Sound {
     rg.gain.linearRampToValueAtTime(0.9, t + 0.12);
     rg.gain.setTargetAtTime(0.45, t + 0.6, 0.8);
     rg.gain.setTargetAtTime(0, t + 2.8, 1.1);
-    roar.connect(lp).connect(rg).connect(this.sfx);
+    roar.connect(lp).connect(rg).connect(this.bus.ignition);
     roar.start(t); roar.stop(t + dur);
     // thump: a falling sine
     const o = c.createOscillator(), og = c.createGain();
@@ -142,7 +152,7 @@ export class Sound {
     o.frequency.exponentialRampToValueAtTime(32, t + 0.8);
     og.gain.setValueAtTime(0.9, t);
     og.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
-    o.connect(og).connect(this.sfx);
+    o.connect(og).connect(this.bus.ignition);
     o.start(t); o.stop(t + 1.7);
     // crackle: high-passed noise chopped by a fast random-ish tremolo
     const cr = this.noiseSource(true), hp = c.createBiquadFilter(), cg = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
@@ -153,12 +163,12 @@ export class Sound {
     lfo.type = 'square'; lfo.frequency.value = 23;
     lg.gain.value = 0.08;
     lfo.connect(lg).connect(cg.gain);
-    cr.connect(hp).connect(cg).connect(this.sfx);
+    cr.connect(hp).connect(cg).connect(this.bus.ignition);
     cr.start(t); lfo.start(t); cr.stop(t + dur); lfo.stop(t + dur);
   }
 
   /** A body sweeping past: a filtered whoosh that pans across and peaks after `lead` seconds. */
-  whoosh(lead = 1, { gain = 0.55, low = 220, high = 1700, len = 2.6 } = {}) {
+  whoosh(lead = 1, { gain = 0.55, low = 220, high = 1700, len = 2.6, bus = 'flyby' } = {}) {
     if (!this.live) return;
     const c = this.ctx, t = c.currentTime, peak = t + lead, end = peak + len * 0.6;
     const src = this.noiseSource(true), bp = c.createBiquadFilter(), g = c.createGain(), pan = c.createStereoPanner();
@@ -172,7 +182,7 @@ export class Sound {
     const side = Math.random() < 0.5 ? -1 : 1;
     pan.pan.setValueAtTime(-0.8 * side, t);
     pan.pan.linearRampToValueAtTime(0.8 * side, end);
-    src.connect(bp).connect(g).connect(pan).connect(this.sfx);
+    src.connect(bp).connect(g).connect(pan).connect(this.bus[bus]);
     src.start(t); src.stop(end + 0.1);
   }
 
@@ -181,7 +191,7 @@ export class Sound {
     if (!this.live) return;
     for (let i = 0; i < 14; i++) {
       const at = Math.random() * dur * 0.8;
-      setTimeout(() => this.whoosh(0.25, { gain: 0.12 + Math.random() * 0.12, low: 400, high: 2600 + Math.random() * 1500, len: 0.8 }), at * 1000);
+      setTimeout(() => this.whoosh(0.25, { gain: 0.12 + Math.random() * 0.12, low: 400, high: 2600 + Math.random() * 1500, len: 0.8, bus: 'rocks' }), at * 1000);
     }
   }
 
@@ -195,7 +205,7 @@ export class Sound {
       g.gain.setValueAtTime(0, at);
       g.gain.linearRampToValueAtTime(0.09, at + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, at + 3.5);
-      o.connect(g).connect(this.sfx);
+      o.connect(g).connect(this.bus.arrival);
       o.start(at); o.stop(at + 3.6);
     });
   }

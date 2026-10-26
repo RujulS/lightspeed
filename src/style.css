@@ -232,3 +232,7 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 11px;
   .mb-time, #trk-stages { display: none; }
 }
 .pop .seg { background: rgba(255, 255, 255, .03); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.pop-sep { padding-top: 10px; border-top: 1px solid var(--line); }
+.pop-levels { display: grid; gap: 7px; }
+.pop-levels .pop-row > label { color: var(--dim); text-transform: none; letter-spacing: 0; font-size: 11.5px; font-weight: 400; }
+.pop-levels.off { opacity: .35; pointer-events: none; }
