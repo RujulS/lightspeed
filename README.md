@@ -32,6 +32,7 @@ Files you only want on your own machine go in `public/music/local/` with their o
 - **Relativity:** aberration and Doppler shift of everything you see. Near light speed the whole sky collapses into a point ahead.
 - **Gaia BH1:** a ray-traced spinning (Kerr) black hole, with a Novikov–Thorne disk and Page–Thorne temperature profile. Each part of the disk is coloured by the Doppler shift and gravitational redshift together. The real hole's spin is unmeasured; it is shown at a/M = 0.9.
 - **Galaxies:** the Milky Way is built from published structural measurements; Andromeda is a photograph placed at its true position, size and orientation. Arriving at Andromeda shows its halo stars, globular clusters and neighbouring galaxies as a long exposure would.
+- **Warp drive:** Alcubierre's bubble at a speed you choose in the menu (1 × c up to a light-year a minute). No time dilation or felt acceleration aboard; the bubble is drawn as a lens that squeezes the view ahead and stretches it behind. Illustrative, and it would need negative energy.
 - **Moons and orbits:** major moons at their real distances and periods, planet orbits, the flight path, and illustrative planet flybys.
 
 ## Credits

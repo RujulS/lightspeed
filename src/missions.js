@@ -41,7 +41,13 @@ export const PROBES = [
     stages: [{ a: G0, beta: 1, label: '1 g antimatter drive' }],
     blurb: 'Ideal relativistic rocket: constant 1 g felt aboard, flip at the midpoint, 1 g braking. Time dilation lets the crew reach other galaxies within a lifetime.',
   },
+  {
+    id: 'warp', name: 'Alcubierre Warp Drive', tag: 'Speculative · 1994', kind: 'warp',
+    speed: 1000, // × c; chosen in the menu (WARP_MIN … WARP_MAX)
+    blurb: 'Miguel Alcubierre\'s 1994 solution of Einstein\'s equations: space contracts ahead of a bubble and expands behind it, carrying the ship faster than light while it sits at rest inside, feeling no acceleration, its clock in step with Earth\'s. It would need negative energy, which may not exist.',
+  },
 ];
+export const WARP_MIN = 1, WARP_MAX = 525960; // up to one light-year a minute
 export const probeById = (id) => PROBES.find((p) => p.id === id);
 
 // ---------------------------------------------------------------------------------------------
@@ -127,6 +133,41 @@ export class Profile {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Warp: the bubble carries the ship at V (which may exceed c). Inside it the ship is at rest in flat
+// space: no acceleration is felt and its clock keeps Earth's time. The bubble spools up over WARP_SPOOL
+// (speed eased in smoothly), cruises, and collapses the same way at the destination; on a hop too
+// short for that, it peaks at V at the midpoint.
+// ---------------------------------------------------------------------------------------------
+const WARP_SPOOL = 60;
+
+export class WarpProfile {
+  constructor(V, L) {
+    const Ts = Math.min(WARP_SPOOL, L / V), Tc = Math.max(0, (L - V * Ts) / V), d = (V * Ts) / 2;
+    this.V = V; this.L = L; this.Ts = Ts; this.Tc = Tc;
+    this.tArrive = 2 * Ts + Tc;
+    const ph = [{ type: 'warp', kind: 'accel', label: 'Warp bubble forming', t0: 0, dt: Ts, x0: 0, dx: d }];
+    if (Tc > 1) ph.push({ type: 'warp', kind: 'cruise', label: 'At warp', t0: Ts, dt: Tc, x0: d, dx: V * Tc });
+    ph.push({ type: 'warp', kind: 'brake', label: 'Bubble collapsing', t0: Ts + Tc, dt: Ts, x0: L - d, dx: d });
+    ph.push({ type: 'coast', phi: 0, label: 'Arrived', t0: this.tArrive, dt: Infinity, x0: L, dx: 0, rest: true });
+    for (const p of ph) p.tau0 = p.t0;
+    this.phases = ph;
+    this.burnEnd = 0;
+  }
+
+  at(t) {
+    const { V, L, Ts, Tc, tArrive } = this;
+    t = Math.max(0, t);
+    const ease = (u) => [V * (3 * u * u - 2 * u * u * u), V * Ts * (u * u * u - (u * u * u * u) / 2)]; // speed, distance
+    let v, x, label;
+    if (t < Ts) { [v, x] = ease(t / Ts); label = 'Warp bubble forming'; }
+    else if (t < Ts + Tc) { v = V; x = (V * Ts) / 2 + V * (t - Ts); label = 'At warp'; }
+    else if (t < tArrive) { const [vv, xx] = ease((tArrive - t) / Ts); v = vv; x = L - xx; label = 'Bubble collapsing'; }
+    else { v = 0; x = L; label = 'Arrived'; }
+    return { x, v, warp: v / C, phi: 0, tau: t, a: 0, label, flip: false, rest: t >= tArrive };
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Missions
 // ---------------------------------------------------------------------------------------------
 const EARTH_R = 6.371e6;
@@ -149,7 +190,7 @@ export class Mission {
   // ---- straight-line relativistic kinematics (burns, coasts, constant cruise)
   planStraight() {
     const p = this.probe, d = this.dest;
-    const rendezvous = p.kind === 'thrust' && !p.flyby;
+    const rendezvous = (p.kind === 'thrust' && !p.flyby) || p.kind === 'warp';
     let tArr = 0, S, T, dir, prof;
     // The ship leaves with Earth's orbital velocity (~30 km/s) and keeps it while it is still near
     // Earth; the effect is modelled as a drift that saturates after ~a month so the heliocentric
@@ -164,7 +205,8 @@ export class Mission {
       S = v3.add(E, v3.scale(dir, EARTH_R + DEPART_ALT));
       T = v3.sub(Tc, v3.scale(dir, d.standoff));
       const L = v3.len(v3.sub(T, S));
-      prof = p.kind === 'cruise' ? new Profile({ v: p.v, L })
+      prof = p.kind === 'warp' ? new WarpProfile(p.speed * C, L)
+        : p.kind === 'cruise' ? new Profile({ v: p.v, L })
         : p.kind === 'ballistic' ? new Profile({ v: p.cruise, L })
           : new Profile({ stages: p.stages, L, rendezvous });
       if (Math.abs(prof.tArrive - tArr) < 1) break;
@@ -309,11 +351,12 @@ export class Mission {
       const f = Math.max(0, Math.min(1, (s.x / this.L - 0.94) / 0.06));
       pos = v3.add(pos, v3.scale(this.corr, f * f * (3 - 2 * f)));
     }
-    const beta = Math.tanh(s.phi);
+    // under warp, beta is the bubble's speed (may exceed 1) and phi stays 0: the ship is at rest inside
+    const beta = s.warp ?? Math.tanh(s.phi);
     const vel = v3.scale(this.dir, beta * C);
     const noseDir = s.flip ? v3.scale(this.dir, -1) : this.dir;
     return {
-      pos, vel, beta, phi: s.phi, gamma: Math.cosh(s.phi), tau: s.tau, accel: Math.abs(s.a), label: s.label,
+      pos, vel, beta, warp: s.warp, phi: s.phi, gamma: Math.cosh(s.phi), tau: s.tau, accel: Math.abs(s.a), label: s.label,
       thrustDir: s.a ? noseDir : null, noseDir, flip: s.flip, arrived: t >= this.tArrive,
       progress: Math.min(1, s.x / this.L),
     };
@@ -348,8 +391,10 @@ export class Mission {
     if (this.mode === 'ballistic') return this.tArrive;
     return this.prof.at(this.tArrive).tau;
   }
+  /** Top speed as a fraction of c (above 1 for a warp trip). */
   maxBeta() {
     if (this.mode === 'ballistic') return v3.len(this.v0) / C;
+    if (this.prof instanceof WarpProfile) return this.prof.at(this.prof.tArrive / 2).warp;
     return Math.max(...this.prof.phases.map((p) => Math.tanh(p.type === 'coast' ? p.phi : Math.max(Math.abs(p.p0), Math.abs(p.p1)))));
   }
   /** Ideal photon-rocket mass ratio m0/m1 = e^(Δφ) for the thrust phases (only meaningful for the antimatter ship). */

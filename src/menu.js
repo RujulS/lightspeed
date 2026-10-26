@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { C, v3, dateToSim } from './constants.js';
 import { planetPos, radecToVec } from './astro.js';
-import { PROBES, Mission } from './missions.js';
+import { PROBES, Mission, probeById } from './missions.js';
 import { DESTINATIONS, RADIUS } from './destinations.js';
 import { Planet, bbColorJS } from './bodies.js';
 import { ProbeModel } from './probes3d.js';
@@ -60,8 +60,15 @@ function glowSprite(color, size) {
   return s;
 }
 
-/** A ship's design top speed as a fraction of c (1 for the antimatter ship, which approaches c). */
-const topSpeed = (p) => (p.kind === 'cruise' ? p.v / C : p.kind === 'ballistic' ? p.cruise / C : p.stages.at(-1).beta);
+/** A ship's design top speed as a fraction of c (1 for the antimatter ship, which approaches c; the
+ *  warp ship's chosen multiple of c). */
+const topSpeed = (p) => (p.kind === 'warp' ? p.speed : p.kind === 'cruise' ? p.v / C : p.kind === 'ballistic' ? p.cruise / C : p.stages.at(-1).beta);
+const speedTag = (p) => (p.kind === 'warp' ? `${p.speed.toLocaleString('en-US')} × c` : topSpeed(p) >= 1 ? '→ 100% c' : fmtPctC(topSpeed(p)));
+// warp speeds offered in the menu (× c): round steps up to one light-year a minute
+const WARP_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 1e4, 2e4, 5e4, 1e5, 2e5, 525960];
+const warpLabel = (v) => (v === 525960 ? '1 light-year a minute' : `${v.toLocaleString('en-US')} × light speed`);
+const saved = (() => { try { return +localStorage.getItem('ls-warp') || 1000; } catch { return 1000; } })();
+probeById('warp').speed = WARP_STEPS.includes(saved) ? saved : 1000;
 
 export class Menu {
   constructor({ panorama, stars, envMap, onContinue, canvas }) {
@@ -103,6 +110,17 @@ export class Menu {
     this.dest = 'saturn'; this.probe = 'antimatter';
     $('i-date').value = new Date().toISOString().slice(0, 10);
     $('i-date').addEventListener('change', () => this.refresh());
+    const iw = $('i-warp'), warp = probeById('warp');
+    iw.max = WARP_STEPS.length - 1;
+    iw.value = WARP_STEPS.indexOf(warp.speed);
+    iw.addEventListener('input', () => {
+      warp.speed = WARP_STEPS[+iw.value];
+      try { localStorage.setItem('ls-warp', warp.speed); } catch { /* not stored */ }
+      const dd = document.querySelector('#m-probes [data-p="warp"] .dd');
+      if (dd) dd.textContent = speedTag(warp);
+      this.rankKey = null; // trip times change
+      this.refresh();
+    });
     $('b-launch').addEventListener('click', () => this.onContinue(this.dest, this.probe, this.launchT()));
     this.buildLists();
     this.select();
@@ -127,7 +145,7 @@ export class Menu {
     $('m-dests').innerHTML = html;
     // name and trip time (filled in by rankProbes) first; the kind of ship and its top speed below
     $('m-probes').innerHTML = PROBES.map((p) => `<button class="m-item" data-p="${p.id}"><div class="row"><span class="nm">${p.name}</span><span class="tt"></span></div>`
-      + `<div class="row"><span class="tg">${p.tag}</span><span class="dd">${topSpeed(p) >= 1 ? '→ 100% c' : fmtPctC(topSpeed(p))}</span></div></button>`).join('');
+      + `<div class="row"><span class="tg">${p.tag}</span><span class="dd">${speedTag(p)}</span></div></button>`).join('');
     this.rankKey = null;
     $('m-dests').onclick = (e) => { const b = e.target.closest('[data-d]'); if (b) { this.dest = b.dataset.d; this.select('dest'); } };
     $('m-probes').onclick = (e) => { const b = e.target.closest('[data-p]'); if (b) { this.probe = b.dataset.p; this.select('probe'); } };
@@ -177,7 +195,9 @@ export class Menu {
     $('m-probe-tag').textContent = p.tag;
     $('m-probe-name').textContent = p.name;
     const top = topSpeed(p);
-    $('m-probe-sub').textContent = top >= 1 ? 'Accelerates toward light speed' : p.kind === 'thrust' ? `Up to ${fmtPctC(top)}` : `Cruises at ${fmtPctC(top)}`;
+    $('m-probe-sub').textContent = p.kind === 'warp' ? 'Faster than light, at rest inside its bubble' : top >= 1 ? 'Accelerates toward light speed' : p.kind === 'thrust' ? `Up to ${fmtPctC(top)}` : `Cruises at ${fmtPctC(top)}`;
+    $('m-warp').classList.toggle('hidden', p.kind !== 'warp');
+    if (p.kind === 'warp') $('m-warp-val').textContent = warpLabel(p.speed);
     $('m-blurb').textContent = p.blurb;
     $('m-trip').textContent = fmtTime(m.t0 - t + m.tArrive);
     const ab = m.shipTimeAtArrival();
@@ -185,7 +205,7 @@ export class Menu {
     $('m-aboard').textContent = fmtTime(ab);
     $('m-light').textContent = fmtTime(dist / C);
     const mb = m.maxBeta();
-    $('m-top').textContent = mb > 0.999 ? `${(mb * 100).toFixed(3)}% c` : fmtPctC(mb);
+    $('m-top').textContent = mb >= 1.001 ? `${mb.toLocaleString('en-US', { maximumFractionDigits: 0 })} × c` : mb > 0.999 ? `${(mb * 100).toFixed(3)}% c` : fmtPctC(mb);
     const ids = ['m-trip', ...(kind === 'probe' ? ['m-probe-name', 'm-blurb'] : kind === 'dest' ? ['m-dest-name', 'm-dest-desc'] : [])];
     for (const id of ids) { const el = $(id); el.classList.remove('m-fade'); void el.offsetWidth; el.classList.add('m-fade'); }
   }
@@ -245,7 +265,7 @@ export class Menu {
     this.probeRoot.clear();
     const holder = new THREE.Group();
     holder.add(m.group);
-    holder.scale.setScalar((id === 'starshot' ? 0.95 : 1.3) / m.length);
+    holder.scale.setScalar(({ starshot: 0.95, warp: 0.9 }[id] ?? 1.3) / m.length); // the warp ship's rings make it wide
     this.probeRoot.add(holder);
     this.probeRoot.userData.appear = 0;
     m.update(0, 0, 1);

@@ -231,6 +231,10 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 11px;
   #tools { right: 12px; } #b-new { left: 12px; }
   .mb-time, #trk-stages { display: none; }
 }
+.m-warp { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 12px; margin: 10px 0 2px; pointer-events: auto; }
+.m-warp label { color: var(--faint); }
+.m-warp input { width: 100%; accent-color: var(--accent); }
+.m-warp b { grid-column: 1 / -1; font: 500 13px var(--mono); color: var(--text); }
 .pop .seg { background: rgba(255, 255, 255, .03); backdrop-filter: none; -webkit-backdrop-filter: none; }
 .pop-sep { padding-top: 10px; border-top: 1px solid var(--line); }
 .pop-levels { display: grid; gap: 7px; }

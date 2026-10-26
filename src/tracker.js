@@ -102,7 +102,7 @@ export class Tracker {
     this.segs = m.mode === 'straight'
       ? m.prof.phases.filter((p) => !p.rest && p.t0 < m.tArrive).map((p) => ({
         d0: p.x0, d1: Math.min(isFinite(p.dx) ? p.x0 + p.dx : Infinity, this.total),
-        kind: p.type === 'thrust' ? (p.flip ? 'brake' : 'accel') : 'cruise',
+        kind: p.kind || (p.type === 'thrust' ? (p.flip ? 'brake' : 'accel') : 'cruise'),
       })).filter((s) => s.d1 > s.d0)
       : [{ d0: 0, d1: this.total, kind: 'coast' }];
     this.stages = buildStages(m);
@@ -285,6 +285,7 @@ function buildStages(m) {
       const t1 = Math.min(p.t0 + p.dt, m.tArrive);
       if (p.flip && !flipped) { flipped = true; out.push({ name: 'Flip, engines forward', t0: p.t0, t1: p.t0 }); }
       if (p.type === 'coast' && t1 - p.t0 < 1) continue; // no zero-length coast for flip-at-midpoint ships
+      if (p.type === 'warp') { out.push({ name: p.label, t0: p.t0, t1, kind: p.kind, phase: p }); continue; }
       out.push({ name: p.type === 'thrust' ? p.label : p.label === 'Cruising' ? 'Cruise' : 'Coast', t0: p.t0, t1, kind: p.type === 'thrust' ? (p.flip ? 'brake' : 'accel') : 'cruise', phase: p });
     }
   }

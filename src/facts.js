@@ -26,6 +26,13 @@ function missionEvents(m, tracker) {
   for (const s of tracker.stages) {
     if (s.t0 >= m.tArrive) continue;
     const dur = fmtTime(s.t1 - s.t0), p = s.phase;
+    if (p?.type === 'warp') {
+      const x = `${Math.round(m.probe.speed).toLocaleString('en-US')} × light speed`;
+      if (s.kind === 'accel') ev.push({ t: s.t0, tag: 'Warp', text: () => `The warp bubble forms: space ahead of it starts to contract and space behind to expand. Nothing aboard feels it.` });
+      else if (s.kind === 'cruise') ev.push({ t: s.t0 + 1, tag: 'Warp', text: () => `At warp: ${x} for the next ${dur}. Inside the bubble the ship is at rest, so its clock keeps Earth's time.` });
+      else ev.push({ t: s.t0, tag: 'Warp', text: () => `The bubble collapses to stop at ${dest}.` });
+      continue;
+    }
     if (s.kind === 'coast') ev.push({ t: s.t0, tag: 'Stage', text: () => `Engines off. Coasting on a curved transfer orbit for ${dur}, steered only by ${m.dest.id === 'moon' ? 'Earth\'s' : 'the Sun\'s'} gravity.` });
     else if (s.kind === 'accel') ev.push({ t: s.t0, tag: 'Stage', text: () => `${s.name} begins: ${dur} of thrust, up to ${speed(p.p1)}.` });
     else if (s.kind === 'cruise') ev.push({ t: s.t0 + 1, tag: 'Stage', text: () => `Engines off. Cruising at ${speed(p.phi)} for the next ${dur}.` });

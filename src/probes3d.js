@@ -158,6 +158,36 @@ function antimatter() {
   return g;
 }
 
+// ---- Alcubierre warp ship, after NASA's IXS Enterprise concept (Harold White & Mark Rademaker, 2014):
+// a slender 120 m hull inside two flat rings that would shape the bubble; the rings glow while it is up
+function warpShip() {
+  const g = new THREE.Group();
+  const white = M.white(), dark = M.dark(), steel = M.steel();
+  // hull: a lathe profile, pointed bow (+Z) to a squared stern
+  const prof = [[0, 62], [2.2, 58], [4.6, 50], [6.4, 38], [7.2, 20], [7.2, -30], [6.6, -46], [5.6, -55], [0, -55]].map(([r, z]) => new THREE.Vector2(r, z));
+  const hull = new THREE.Mesh(new THREE.LatheGeometry(prof, 64), white);
+  hull.rotation.x = Math.PI / 2; g.add(hull);
+  g.add(along(cyl(7.4, 7.4, 6, dark), 22));          // bridge band
+  g.add(along(cyl(5.8, 4.6, 8, steel), -58));        // conventional engine bell for in-system moves
+  // the two rings: flat bands, perpendicular to the hull, on four spokes each
+  const glow = new THREE.MeshStandardMaterial({ color: 0x3a4a66, metalness: 0.7, roughness: 0.35, emissive: 0x4fa8ff, emissiveIntensity: 0 });
+  const rings = [];
+  for (const [z, r] of [[18, 46], [-26, 46]]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 1.4, 16, 160), glow);
+    ring.scale.z = 3.2; // flattened into a band along the hull
+    ring.position.z = z; g.add(ring); rings.push(ring);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const s = new THREE.Mesh(new THREE.BoxGeometry(r - 7, 1.2, 3), steel);
+      s.position.set(Math.cos(a) * (r + 7) / 2, Math.sin(a) * (r + 7) / 2, z);
+      s.rotation.z = a; g.add(s);
+    }
+  }
+  g.userData.rings = glow;
+  g.userData.length = 120;
+  return g;
+}
+
 // ------------------------------------------------------------------------------- engine effects
 // Exhaust as a column of soft camera-facing glows: smooth from every angle, hot white at the nozzle,
 // fading into the engine's plasma colour downstream.
@@ -199,7 +229,7 @@ export class ProbeModel {
       const { url, length, fix } = id2glb[this.id];
       m = await loadGLB(url, length, fix);
       m.userData.length = length;
-    } else m = { orion, daedalus, starshot, antimatter }[this.id]();
+    } else m = { orion, daedalus, starshot, antimatter, warp: warpShip }[this.id]();
     this.model = m;
     this.length = m.userData.length;
     this.group.add(m);
@@ -215,8 +245,11 @@ export class ProbeModel {
     return this;
   }
 
-  /** thrusting: proper acceleration (m/s²) or 0; t: wall time seconds; warp: sim seconds per real second */
-  update(accel, t, warp) {
+  /** thrusting: proper acceleration (m/s²) or 0; t: wall time seconds; warp: sim seconds per real second;
+   *  bubble: 0…1, how far the warp bubble is up (the warp ship's rings glow with it) */
+  update(accel, t, warp, bubble = 0) {
+    const rings = this.model?.userData.rings;
+    if (rings) rings.emissiveIntensity += (bubble * (2.2 + 0.3 * Math.sin(t * 5)) - rings.emissiveIntensity) * 0.15;
     if (this.plume) {
       const P = this.plume.userData;
       P.power += ((accel > 0 ? 1 : 0) - P.power) * 0.1;

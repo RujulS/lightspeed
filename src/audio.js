@@ -9,7 +9,7 @@ const store = {
 };
 
 /** The effects, each with its own volume: [id, label]. */
-export const EFFECTS = [['countdown', 'Countdown'], ['ignition', 'Ignition'], ['engine', 'Engine'], ['flyby', 'Flybys'], ['rocks', 'Rock fields'], ['arrival', 'Arrival']];
+export const EFFECTS = [['countdown', 'Countdown'], ['ignition', 'Ignition'], ['engine', 'Engine'], ['warp', 'Warp bubble'], ['flyby', 'Flybys'], ['rocks', 'Rock fields'], ['arrival', 'Arrival']];
 
 export class Sound {
   constructor() {
@@ -69,6 +69,22 @@ export class Sound {
     hum.connect(humGain).connect(this.drone);
     this.drone.connect(this.bus.engine);
     src.start(); hum.start();
+    // the warp hum: a low fifth, slowly beating, under an airy high shimmer; warpHum(level) sets its volume
+    this.hum = ctx.createGain();
+    this.hum.gain.value = 0;
+    for (const [f, k] of [[55, 0.5], [82.6, 0.3], [110.4, 0.15]]) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; g.gain.value = k;
+      o.connect(g).connect(this.hum); o.start();
+    }
+    const air = this.noiseSource(true), bp = ctx.createBiquadFilter(), ag = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+    bp.type = 'bandpass'; bp.frequency.value = 3200; bp.Q.value = 3;
+    ag.gain.value = 0.25;
+    lfo.frequency.value = 0.4; lg.gain.value = 0.15;
+    lfo.connect(lg).connect(ag.gain);
+    air.connect(bp).connect(ag).connect(this.hum);
+    air.start(); lfo.start();
+    this.hum.connect(this.bus.warp);
     this.ready.then(() => this.updateMusic());
   }
 
@@ -117,6 +133,29 @@ export class Sound {
   engine(level) {
     if (!this.ctx) return;
     this.drone.gain.setTargetAtTime(0.16 * level, this.ctx.currentTime, 0.4);
+  }
+
+  /** Warp bubble: 0 … 1 as it spools up and down. Called every frame; changes glide. */
+  warpHum(level) {
+    if (!this.ctx) return;
+    this.hum.gain.setTargetAtTime(0.12 * level, this.ctx.currentTime, 0.5);
+  }
+
+  /** The bubble forming: a deep sweep up into a bright swell. */
+  warpUp() {
+    if (!this.live) return;
+    const c = this.ctx, t = c.currentTime, o = c.createOscillator(), f = c.createBiquadFilter(), g = c.createGain();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(40, t);
+    o.frequency.exponentialRampToValueAtTime(320, t + 2.2);
+    f.type = 'lowpass'; f.Q.value = 6;
+    f.frequency.setValueAtTime(120, t);
+    f.frequency.exponentialRampToValueAtTime(2400, t + 2.2);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 1.8);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 3.4);
+    o.connect(f).connect(g).connect(this.bus.warp);
+    o.start(t); o.stop(t + 3.5);
   }
 
   /** Countdown blip; last = the higher "go" tone. */

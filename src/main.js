@@ -35,7 +35,7 @@ const sound = new Sound();
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.004, 1e16);
 const scene = new THREE.Scene();
 const probeScene = new THREE.Scene();
-const { composer, lens, bloom, mainPass, probePass } = createComposer(renderer, scene, probeScene, camera);
+const { composer, lens, warp: warpPass, bloom, mainPass, probePass } = createComposer(renderer, scene, probeScene, camera);
 
 const SQZ = 4e13; // beyond this, meshes are pulled in along the line of sight and shrunk (same angular size)
 
@@ -117,6 +117,7 @@ const BH_DISK_N = (() => {
 // equatorial plane. Thin-disk constants: the innermost stable circular orbit (Bardeen, Press &
 // Teukolsky 1972) and the Page–Thorne flux coefficients, normalised to a peak of 1.
 const BH_SPIN = 0.9;
+const WARP_R = 0.75; // warp bubble radius, in ship lengths (the rings sit just inside it)
 let BLOOM = bloom.strength;
 (function kerrDisk(a) {
   const z1 = 1 + Math.cbrt(1 - a * a) * (Math.cbrt(1 + a) + Math.cbrt(1 - a)), z2 = Math.sqrt(3 * a * a + z1 * z1);
@@ -209,7 +210,7 @@ async function startMission(destId, probeId, launchT, autoplay = true) {
   app.mission = new Mission(app.probe, app.dest, launchT, null);
   app.t = app.mission.t0;
   app.warp = 1;
-  app.arrivedShown = false;
+  app.arrivedShown = false; app.bubbleHeard = false;
   $('arrive').classList.add('hidden');
   const m = await getModel(probeId);
   probeRoot.clear();
@@ -778,7 +779,12 @@ function frame(now) {
 
   // ---- relativity: the camera rides with the probe only when it is following it
   const riding = ctl.focus === 'probe';
-  const phi = riding ? (st.phi || 0) : 0;
+  // In a warp bubble the ship is at rest (phi = 0), but from inside, the sky has come through the
+  // bubble wall, which squeezes it toward the front. That is shown with the aberration mapping at a
+  // mild, speed-dependent strength (forward Doppler ≈ 2.3 at 1,000 c, ≈ 4.8 at a light-year a minute).
+  // From outside the bubble (the usual camera distance) the wall is seen as a lens instead (warpPass).
+  const inBubble = st.warp > 0 && app.model && v3.len(OFF) < WARP_R * app.model.length;
+  const phi = riding ? (st.warp > 0 ? (inBubble ? 0.12 * Math.log1p(st.warp) : 0) : st.phi || 0) : 0;
   const vdir = st.beta > 0 ? v3.norm(st.vel) : [1, 0, 0];
   setObserverVelocity(vdir, phi);
   const beta = Math.tanh(phi);
@@ -918,7 +924,22 @@ function frame(now) {
     if (!app.quatInit) { app.quat.copy(q); app.quatInit = true; }
     app.quat.rotateTowards(q, dt * 0.45); // turns (the flip, entering orbit) at a steady, visible ~26°/s
     probeRoot.quaternion.copy(app.quat);
-    pm.update(app.playing ? st.accel : 0, wall, app.warp);
+    const bubble = st.warp > 0 ? st.warp / app.probe.speed : 0; // 0 … 1 as the bubble spools up and down
+    pm.update(app.playing ? st.accel : 0, wall, app.warp, bubble);
+    sound.warpHum(menu.visible || !app.playing ? 0 : bubble);
+    if (bubble > 0.02 && !app.bubbleHeard && app.playing) { app.bubbleHeard = true; sound.warpUp(); }
+    // the warp bubble as a lens around the ship, seen from outside (zoom inside it for the crew's view)
+    warpPass.enabled = bubble > 0.001 && v3.len(relW(st.pos)) > WARP_R * pm.length;
+    if (warpPass.enabled) {
+      const u = warpPass.uniforms;
+      u.uActive.value = 1;
+      u.uCenter.value.copy(probeRoot.position).applyMatrix4(camera.matrixWorldInverse);
+      u.uAxis.value.set(...m.dir).transformDirection(camera.matrixWorldInverse);
+      u.uR.value = WARP_R * pm.length;
+      u.uK.value = (0.3 + 0.08 * Math.log10(app.probe.speed)) * bubble; // bending (rad): 0.54 at 1,000 c
+      u.uTime.value = wall;
+      u.uInvProj.value.copy(camera.projectionMatrixInverse); u.uProj.value.copy(camera.projectionMatrix);
+    }
     sound.engine(app.playing && st.accel > 0 && probeRoot.visible && !menu.visible ? 1 : 0);
     // light from the nearest star (or the destination galaxy in deep space)
     const near = [[sunW, 5772, dSun, 4.83], [PROXIMA.pos, 3042, dProx, 15.5], [compW, 5850, dComp, 5.0]]
@@ -983,6 +1004,7 @@ function frame(now) {
   facts.update(dt, app.playing && !menu.visible, app.t - m.t0);
 
   if (menu.visible) {
+    warpPass.enabled = false;
     // the menu has its own little stage; everything else keeps updating underneath
     setObserverVelocity([1, 0, 0], 0);
     menu.update(dt, wall);
@@ -1042,8 +1064,11 @@ function updatePath(st) {
 function updateHUD(st) {
   const m = app.mission;
   const v = st.beta * C;
-  // speed: km/s while slow, share of light speed once it matters
-  if (st.beta < 0.01) {
+  // speed: km/s while slow, share of light speed once it matters, multiples of it under warp
+  if (st.beta >= 1) {
+    $('h-speed').textContent = st.beta.toLocaleString('en-US', { maximumFractionDigits: st.beta < 10 ? 1 : 0 }) + '×';
+    $('h-speed-unit').textContent = 'light speed';
+  } else if (st.beta < 0.01) {
     $('h-speed').textContent = (v / 1e3).toLocaleString('en-US', { maximumFractionDigits: v < 1e4 ? 2 : 1 });
     $('h-speed-unit').textContent = 'km/s';
   } else {
@@ -1053,6 +1078,7 @@ function updateHUD(st) {
   let sub;
   if (app.prelaunch) sub = 'On the launch pad';
   else if (st.orbiting) sub = isFinite(m.orbit.P) ? `In orbit, once every ${fmtTime(m.orbit.P)}` : 'Holding position';
+  else if (st.warp > 0) sub = 'in a warp bubble · nothing felt aboard';
   else if (st.beta < 0.01) sub = `${(v * 3.6).toLocaleString('en-US', { maximumFractionDigits: 0 })} km/h`;
   else sub = `${(v / 1e3).toLocaleString('en-US', { maximumFractionDigits: 0 })} km/s`;
   if (st.accel > 0 && !app.prelaunch) sub += ` · engines at ${(st.accel / G0).toLocaleString('en-US', { maximumFractionDigits: st.accel / G0 > 100 ? 0 : 2 })} g`;
@@ -1085,7 +1111,8 @@ function showArrival(st) {
   const ts = m.shipTimeAtArrival();
   const mb = m.maxBeta();
   const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
-  const top = mb < 0.01 ? (mb * C / 1e3).toFixed(1) + ' km/s' : (mb * 100).toFixed(mb > 0.999 ? 4 : 1) + '% of light';
+  const top = mb >= 1 ? `${mb.toLocaleString('en-US', { maximumFractionDigits: 0 })} × light speed`
+    : mb < 0.01 ? (mb * C / 1e3).toFixed(1) + ' km/s' : (mb * 100).toFixed(mb > 0.999 ? 4 : 1) + '% of light';
   const flyNote = m.flyby
     ? `<p class="flyby">The real ${app.probe.name} cannot brake: it would streak past at ${top}${mb > 0.01 ? ` and cross this view in ${fmtTime((2 * app.dest.standoff) / (mb * C))}` : ''}. Here it is parked in orbit so you can look around.</p>`
     : '';

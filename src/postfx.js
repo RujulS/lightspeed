@@ -258,6 +258,62 @@ const LensShader = {
     }`,
 };
 
+// The warp bubble seen as a lens. Alcubierre's metric contracts space ahead of the bubble and expands
+// it behind (the expansion of the volume elements goes as the cosine of the angle from the direction of
+// travel, strongest at the wall). A sight line through the front of the bubble therefore sees the
+// background squeezed (pushed away from the axis: more sky in less of the picture, brighter and
+// bluer), through the back stretched (dimmer and redder), with most effect through the middle of the
+// bubble and a faint shimmer where it grazes the wall. From inside, every sight line leaves through the
+// wall: the sky is squeezed toward the front (done for all directions by the aberration code, see
+// main.js) and this pass adds only a little more. Illustrative: the exact image depends on the wall's
+// shape and thickness, which the theory leaves open.
+const WarpShader = {
+  uniforms: {
+    tDiffuse: { value: null }, uActive: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uAxis: { value: new THREE.Vector3(0, 0, -1) },
+    uR: { value: 1 }, uK: { value: 0 }, uTime: { value: 0 }, uInvProj: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() },
+  },
+  vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uActive, uR, uK, uTime;
+    uniform vec3 uCenter, uAxis;   // view space
+    uniform mat4 uInvProj, uProj;
+    varying vec2 vUv;
+    void main() {
+      vec4 base = texture2D(tDiffuse, vUv);
+      if (uActive < 0.5) { gl_FragColor = base; return; }
+      vec4 vv = uInvProj * vec4(vUv * 2.0 - 1.0, -1.0, 1.0);
+      vec3 d = normalize(vv.xyz / vv.w);
+      vec3 b = uCenter;
+      float R2 = uR * uR, tca = dot(b, d), d2 = dot(b, b) - tca * tca;
+      bool inside = dot(b, b) < R2;
+      if (d2 >= R2 || (!inside && tca < 0.0)) { gl_FragColor = base; return; }
+      float thc = sqrt(R2 - d2);
+      float cOut = dot((tca + thc) * d - b, uAxis) / uR;            // where the sight line leaves the bubble
+      float cIn = inside ? cOut : dot((tca - thc) * d - b, uAxis) / uR;
+      float chord = inside ? 1.0 : thc / uR;                        // 1 through the middle, 0 grazing
+      float w = inside ? 0.12 : chord;
+      float s = uK * w * 0.5 * (cIn + cOut);                         // + ahead (contraction), − behind (expansion)
+      vec3 perp = d - uAxis * dot(d, uAxis);
+      float pl = length(perp);
+      vec3 dd = pl > 1e-5 ? normalize(d + s * perp / pl) : d;
+      vec4 c = uProj * vec4(dd, 1.0);
+      vec2 uv = c.xy / c.w * 0.5 + 0.5;
+      // near the screen edge the bent sight line can point off the picture: fade back to the straight view
+      vec2 e = min(uv, 1.0 - uv);
+      float onScreen = c.w > 0.0 ? smoothstep(0.0, 0.03, min(e.x, e.y)) : 0.0;
+      vec3 col = mix(base.rgb, texture2D(tDiffuse, clamp(uv, 0.001, 0.999)).rgb, onScreen);
+      col *= max(0.0, 1.0 + 1.5 * s);
+      col *= mix(vec3(1.0), s > 0.0 ? vec3(0.75, 0.9, 1.35) : vec3(1.3, 0.9, 0.7), min(1.0, abs(s) * 2.5));
+      // the wall: a faint shimmer, strongest where the sight line grazes it and over the two lobes
+      float graze = inside ? 0.0 : pow(1.0 - chord, 5.0);
+      float ripple = 0.5 + 0.5 * sin(36.0 * cOut - uTime * 2.0);
+      vec3 tint = cOut > 0.0 ? vec3(0.55, 0.75, 1.0) : vec3(1.0, 0.7, 0.55);
+      col += tint * uK * (graze * (0.3 + 0.35 * ripple) * 0.35 + 0.025 * abs(cOut) * chord);
+      gl_FragColor = vec4(col, base.a);
+    }`,
+};
+
 export function createComposer(renderer, mainScene, probeScene, camera) {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
@@ -266,6 +322,9 @@ export function createComposer(renderer, mainScene, probeScene, camera) {
   composer.addPass(mainPass);
   const lens = new ShaderPass(LensShader);
   composer.addPass(lens);
+  const warp = new ShaderPass(WarpShader);
+  warp.enabled = false;
+  composer.addPass(warp);
   const probePass = new RenderPass(probeScene, camera);
   probePass.clear = false;
   probePass.clearDepth = true;
@@ -290,5 +349,5 @@ export function createComposer(renderer, mainScene, probeScene, camera) {
   const quad = bloom.fsQuad, draw = quad.render.bind(quad);
   quad.render = (r) => { if (quad.material !== bloom.blendMaterial) draw(r); };
   composer.addPass(output);
-  return { composer, lens, bloom, mainPass, probePass };
+  return { composer, lens, warp, bloom, mainPass, probePass };
 }
