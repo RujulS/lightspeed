@@ -435,7 +435,13 @@ const menu = new Menu({
     await prepareLaunch(menu.dest, menu.probe, menu.launchT());
   },
 });
-function showRunUI(v) { openPop(null); for (const id of ['hud', 'tools', 'b-new', 'missionbar', 'mappanel']) $(id).classList.toggle('hidden', !v); if (!v) $('radar-big').classList.add('hidden'); layoutTop(); }
+function showRunUI(v) {
+  openPop(null);
+  sound.setInJourney(v);
+  for (const id of ['hud', 'tools', 'b-new', 'missionbar', 'mappanel']) $(id).classList.toggle('hidden', !v);
+  if (!v) $('radar-big').classList.add('hidden');
+  layoutTop();
+}
 // Keep the top-centre readout clear of the top-right buttons: measured, not a fixed breakpoint, since
 // both change width (window size, the numbers themselves, the Disk button). If they would touch, the
 // readout (and the update text under it) drops below the buttons, and the arrival card below that.
@@ -610,26 +616,36 @@ function orbitRate() {
   const P = app.mission.orbit?.P;
   return Math.max(floorRate(), isFinite(P) ? niceRate(Math.max(1, P / 80)) : 1);
 }
-function flybyAt(rel) { for (const f of app.flybys) if (rel >= f.t0 && rel < f.t1) return f; return null; }
-function zapAt(rel) { for (const f of app.flybys) if (rel >= f.z0 && rel < f.t0) return f; return null; }
+function flybyPhase(rel, baseRate) {
+  let bestFly = null, bestRate = baseRate;
+  for (const f of app.flybys) {
+    if (rel >= f.w0 && rel <= f.w1) {
+      const fr = f.rateAt(rel, baseRate);
+      if (fr < bestRate) {
+        bestRate = fr;
+        bestFly = f;
+      }
+    }
+  }
+  return bestFly ? { rate: bestRate, fly: bestFly } : null;
+}
 /** Rough screen time of the whole trip at factor F, slow-motion moments included. */
 function screenTime(F) {
   const m = app.mission, k = Math.min(K_LIFT, RAMP_MAX / Math.log(Math.max(Math.E, F)));
   const ramps = 2 * k * Math.log(Math.max(1, (F * k) / floorRate(0)));
-  return m.tArrive / F + ramps + app.flybys.reduce((s, f) => s + (f.t1 - f.t0) / Math.min(F, f.rate) + 0.3, 0);
+  return m.tArrive / F + ramps + app.flybys.reduce((s, f) => s + (f.durScreen || 9.8), 0);
 }
 /** Time-flow rate (sim s per screen s) rel s after launch, and the moment it belongs to. */
 function phaseAt(rel) {
   const m = app.mission;
   if (rel >= m.tArrive) return { rate: orbitRate(), kind: 'orbit' };
-  const lift = Math.max(1, rel / rampK(K_LIFT)), arrive = Math.max(1, (m.tArrive - rel) / rampK(K_ARRIVE)), fb = flybyAt(rel);
+  const lift = Math.max(1, rel / rampK(K_LIFT)), arrive = Math.max(1, (m.tArrive - rel) / rampK(K_ARRIVE));
   let rate = app.factor, kind = 'cruise';
   if (lift < rate) { rate = lift; kind = 'lift'; }
   if (arrive < rate) { rate = arrive; kind = 'arrive'; }
+  const fb = flybyPhase(rel, rate);
   if (fb && fb.rate < rate) { rate = fb.rate; kind = 'flyby'; }
-  const zap = zapAt(rel); // the planet rushing in: still far faster than the pass, but visible
-  if (zap && zap.zrate < rate) rate = zap.zrate;
-  return { rate: Math.max(rate, floorRate(rel)), kind, fly: kind === 'flyby' ? fb : null };
+  return { rate: Math.max(rate, floorRate(rel)), kind, fly: kind === 'flyby' ? fb.fly : null };
 }
 const rateAt = (rel) => phaseAt(rel).rate;
 // advance by dt of screen time, stopping exactly at flyby edges and the arrival so that even a very
@@ -641,9 +657,10 @@ function advance(t, dt) {
     const rel = t - m.t0, r = rateAt(rel);
     let edge = rel < m.tArrive ? m.tArrive : Infinity;
     for (const f of app.flybys) {
-      if (f.z0 > rel && f.z0 < edge) edge = f.z0;
+      if (f.w0 > rel && f.w0 < edge) edge = f.w0;
       if (f.t0 > rel && f.t0 < edge) edge = f.t0;
       if (f.t1 > rel && f.t1 < edge) edge = f.t1;
+      if (f.w1 > rel && f.w1 < edge) edge = f.w1;
     }
     if (rel + r * left < edge) { t += r * left; left = 0; }
     else {

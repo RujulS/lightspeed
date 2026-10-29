@@ -32,11 +32,6 @@ export const PROBES = [
     blurb: 'British Interplanetary Society design: two-stage inertial-confinement fusion rocket, 54,000 t, reaching 12.2% c in 3.8 years. Flyby only.',
   },
   {
-    id: 'starshot', name: 'Breakthrough Starshot', tag: 'Proposed · 2016', kind: 'thrust', flyby: true,
-    stages: [{ a: 0.2 * C / 600, beta: 0.2, label: 'Laser boost (100 GW array)' }],
-    blurb: 'Gram-scale chip on a 4 m light sail, pushed by a 100 GW ground laser at ~10,000 g for 10 minutes to 20% c. Flyby only, no braking.',
-  },
-  {
     id: 'antimatter', name: 'Antimatter Photon Ship', tag: 'Conceptual', kind: 'thrust', flyby: false,
     stages: [{ a: G0, beta: 1, label: '1 g antimatter drive' }],
     blurb: 'Ideal relativistic rocket: constant 1 g felt aboard, flip at the midpoint, 1 g braking. Time dilation lets the crew reach other galaxies within a lifetime.',

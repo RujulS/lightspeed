@@ -20,6 +20,7 @@ export class Sound {
     this.levels = { ...Object.fromEntries(EFFECTS.map(([id]) => [id, 1])), ...store.get('levels', {}) };
     this.tracks = [];
     this.ctx = null;
+    this.inJourney = false;
     this.audio = new Audio();
     this.audio.loop = true;
     this.audio.preload = 'none';
@@ -104,6 +105,10 @@ export class Sound {
   setMusic(on) { this.musicOn = on; store.set('music', on); this.start(); this.updateMusic(); }
   setTrack(file) { this.track = file; store.set('track', file); this.start(); this.updateMusic(true); }
   setVolume(v) { this.volume = v; store.set('volume', v); this.updateMusic(); }
+  setInJourney(inJourney) {
+    this.inJourney = !!inJourney;
+    this.updateMusic();
+  }
   setLevel(id, v) {
     this.levels[id] = v; store.set('levels', this.levels);
     if (this.ctx) this.bus[id].gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
@@ -111,7 +116,7 @@ export class Sound {
 
   updateMusic(restart = false) {
     if (!this.ctx) return;
-    const want = this.musicOn && this.track;
+    const want = this.musicOn && this.track && this.inJourney;
     const t = this.ctx.currentTime;
     if (want) {
       const url = 'music/' + this.track;
@@ -121,8 +126,8 @@ export class Sound {
       this.music.gain.setTargetAtTime(this.volume * 0.8, t, 0.6); // fade in
     } else {
       this.music.gain.cancelScheduledValues(t);
-      this.music.gain.setTargetAtTime(0, t, 0.3);
-      setTimeout(() => { if (!this.musicOn || !this.track) this.audio.pause(); }, 1500);
+      this.music.gain.setTargetAtTime(0, t, 0.4);
+      setTimeout(() => { if (!this.inJourney || !this.musicOn || !this.track) this.audio.pause(); }, 1500);
     }
   }
 

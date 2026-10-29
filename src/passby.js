@@ -16,17 +16,12 @@ import { MoonSystem, MOONS } from './moons.js';
 const ORBIT = { mercury: 0.387, venus: 0.723, mars: 1.524, jupiter: 5.203, saturn: 9.537, uranus: 19.19, neptune: 30.07, pluto: 39.48 };
 const FIELD_S = 9;    // seconds on screen per rock field
 const SIDE = 1.1, LIFT = 0.3; // closest approach ≈ 1.14 radii (Jupiter: ~10,000 km above the clouds; Juno skims 4,000 km)
-const VIEW = 2000;    // in view while within this many radii (ahead or behind)
-const SLOW = 15;      // time slows only while the stand-in is within this many radii
-const PASS = 5;       // during the pass, the ship covers this many radii per screen second
-const ZAP = 300, ZAP_S = 0.3; // the rush in from 300 radii is given at least 0.3 s so it can be seen
-const LOOK = 1200;    // the cinematic camera starts turning toward a stand-in this many radii out…
-const HOLD = 1;       // …and keeps watching it for this many screen seconds after the slow pass
-// Up close the planet's direction swings round faster than any smooth camera can follow (hundreds of °/s
-// at 1.14 radii). The camera instead sweeps as if the planet passed CAM_SIDE radii out: same start and
-// end, peaking at ~48°/s for a moment at closest approach, and staying within ~22° of the planet's
-// real direction while the planet (which now fills much of the sky) goes by.
-const CAM_SIDE = 6;
+const VIEW = 3200;    // in view while within this many radii (ahead or behind)
+const SLOW = 18;      // time slows to close-pass rate within this many radii
+const PASS = 8.5;     // during the close pass, the ship covers this many radii per screen second
+const LOOK = 2200;    // the cinematic camera starts turning toward a stand-in this many radii out…
+const CAM_SIDE = 7.5; // camera sweeps as if the planet passed CAM_SIDE radii out
+const ALPHA = 1.75;   // power-law ramp from close-pass rate to cruise rate
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
 function rockGeometry(seed) {
@@ -114,6 +109,8 @@ export class Passbys {
         e.v = v; e.R = R;
         e.w0 = Math.max(0, e.t - (VIEW * R) / v);
         e.w1 = Math.min(m.tArrive, e.t + (VIEW * R) / v);
+        e.t0 = Math.max(0, e.t - (SLOW * R) / v);
+        e.t1 = Math.min(m.tArrive, e.t + (SLOW * R) / v);
         e.rate = niceRate(Math.max(1, (PASS * R) / v));
       }
       const tb = tracker.cross((t) => v3.len(pos(t)), 2.7 * AU);
@@ -125,12 +122,28 @@ export class Passbys {
     this.next = 0; this.queue = [];
   }
 
-  /** Slow-motion windows for the time flow: [{t0, t1, tc (closest approach), rate, z0, zrate (the rush in), name, speed, body}], s after launch. */
+  /** Slow-motion windows for the time flow: [{t0, t1, w0, w1, tc (closest approach), rate, name, speed, body, v, R, durScreen, rateAt}], s after launch. */
   flybyWindows() {
     return this.events.filter((e) => e.kind === 'planet' && e.w1 > e.w0).map((e) => ({
-      t0: Math.max(0, e.t - (SLOW * e.R) / e.v), t1: e.t + (SLOW * e.R) / e.v, tc: e.t, rate: e.rate,
-      z0: Math.max(0, e.t - (ZAP * e.R) / e.v), zrate: ((ZAP - SLOW) * e.R) / e.v / ZAP_S,
-      name: `Flyby · ${e.name[0].toUpperCase() + e.name.slice(1)}`, speed: e.v, body: e.name,
+      t0: e.t0,
+      t1: e.t1,
+      w0: e.w0,
+      w1: e.w1,
+      tc: e.t,
+      rate: e.rate,
+      v: e.v,
+      R: e.R,
+      name: `Flyby · ${e.name[0].toUpperCase() + e.name.slice(1)}`,
+      speed: e.v,
+      body: e.name,
+      durScreen: 9.8,
+      rateAt(rel, cruiseRate) {
+        const s = Math.abs(e.t - rel) * e.v / e.R;
+        if (s <= SLOW) return e.rate;
+        if (s >= VIEW) return cruiseRate;
+        const ramp = e.rate * Math.pow(s / SLOW, ALPHA);
+        return Math.max(e.rate, Math.min(cruiseRate, ramp));
+      },
     }));
   }
 
@@ -142,7 +155,7 @@ export class Passbys {
   }
 
   hide(a) { a.field.visible = false; }
-  hidePlanet(e) { this.planet(e.id).root.visible = false; this.systems[e.id]?.hide(); e.basis = null; e.passAt = undefined; }
+  hidePlanet(e) { this.planet(e.id).root.visible = false; this.systems[e.id]?.hide(); e.basis = null; e.heard = false; }
 
   /**
    * rel: s after launch; clock: screen-time s that only advances while the sim plays (so passbys pause
@@ -201,23 +214,44 @@ export class Passbys {
     const p = this.planet(e.id), R = e.R, { f, side, up } = e.basis;
     // on a line parallel to the flight path; the ship covers it at its real speed
     const along = e.v * (e.t - rel);
+    const s = along / R;
+    const absS = Math.abs(s);
+    // Smooth distance fade near the outer edge of VIEW so the planet emerges from/shrinks to zero
+    const fade = Math.min(1, Math.max(0, (VIEW - absS) / (VIEW * 0.25)));
     const w = v3.add(v3.add(ctx.st.pos, v3.scale(side, SIDE * R)), v3.add(v3.scale(up, LIFT * R), v3.scale(f, along)));
-    p.root.visible = true;
-    ctx.place(p.root, w, R);
-    const sun = v3.norm(v3.scale(w, -1));
-    p.update(ctx.t, new THREE.Vector3(...sun), ctx.sunColor);
-    if (along > -20 * R) ctx.label(`${e.name[0].toUpperCase() + e.name.slice(1)}<small>illustrative pass</small>`, w);
-    this.systems[e.id]?.update(w, ctx.moons);
-    // for the cinematic camera: turn toward it as it rushes in, watch it go by, then let go
-    const s = along / R, th = Math.atan2(CAM_SIDE, s);
-    // sound: the whoosh is started ~1 screen second (5 radii at the pass rate) before closest approach
+
+    if (fade > 0.001) {
+      p.root.visible = true;
+      ctx.place(p.root, w, R * fade);
+      const sun = v3.norm(v3.scale(w, -1));
+      p.update(ctx.t, new THREE.Vector3(...sun), ctx.sunColor);
+      if (along > -100 * R && along < 1500 * R && fade > 0.1) {
+        ctx.label(`${e.name[0].toUpperCase() + e.name.slice(1)}<small>illustrative pass</small>`, w);
+      }
+      this.systems[e.id]?.update(w, ctx.moons);
+    } else {
+      p.root.visible = false;
+      this.systems[e.id]?.hide();
+    }
+
+    // sound: the whoosh is started ~1 screen second (at PASS rate) before closest approach
     if (!e.heard && s <= PASS && s > -SLOW) { e.heard = true; this.onPass?.(e); }
+
+    // for the cinematic camera: turn smoothly toward the planet as it approaches from afar,
+    // follow it as it sweeps past up close, and watch it smoothly recede into deep space
+    const th = Math.atan2(CAM_SIDE, s);
     const out = v3.norm(v3.add(v3.scale(side, SIDE), v3.scale(up, LIFT)));
     const dir = v3.add(v3.scale(f, Math.cos(th)), v3.scale(out, Math.sin(th)));
-    let weight;
-    if (s > 0) { const u = Math.max(0, Math.min(1, (LOOK - s) / (0.5 * LOOK))); weight = u * u * (3 - 2 * u); }
-    else if (s > -SLOW) weight = 1;
-    else { if (e.passAt === undefined) e.passAt = clock; weight = clock - e.passAt < HOLD ? 1 : 0; }
+    let weight = 0;
+    if (s >= SLOW) {
+      const u = Math.max(0, Math.min(1, (LOOK - s) / (LOOK - SLOW)));
+      weight = u * u * (3 - 2 * u);
+    } else if (s >= -SLOW) {
+      weight = 1;
+    } else {
+      const u = Math.max(0, Math.min(1, (-s - SLOW) / (LOOK - SLOW)));
+      weight = 1 - u * u * (3 - 2 * u);
+    }
     if (weight > (this.focus?.weight || 0)) this.focus = { dir, weight };
   }
 

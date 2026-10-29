@@ -67,7 +67,7 @@ export class Setup {
   constructor(onLaunch) {
     this.onLaunch = onLaunch;
     this.dest = 'proxima';
-    this.probe = 'starshot';
+    this.probe = 'orion';
     const today = new Date();
     $('i-date').value = today.toISOString().slice(0, 10);
     $('i-date').addEventListener('change', () => this.refresh());
