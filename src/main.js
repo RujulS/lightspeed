@@ -892,6 +892,13 @@ function frame(now) {
   stars.material.uniforms.uGain.value = keep;
   const pano = 1 - smoothstep(350, 2500, dSunPc);
   panorama.material.uniforms.uGain.value = pano * keep;
+  {
+    // zodiacal light: brightest inside Earth's orbit, thinning with the dust density, gone past ~8 AU
+    const u = panorama.material.uniforms, rAU = dSun / AU;
+    u.uSunDir.value.set(...v3.norm(v3.sub(sunW, cam)));
+    u.uEclN.value.set(...ECLIPTIC_NORTH);
+    u.uZodi.value = 0.0024 * Math.pow(Math.max(rAU, 0.2), -1.8) * (1 - smoothstep(3, 8, rAU)) * keep;
+  }
   const proj = pxPerRad * DPR;
   // layers faded to nothing are not drawn at all (the panorama covers the whole screen; the Milky Way
   // model is 310,000 points)

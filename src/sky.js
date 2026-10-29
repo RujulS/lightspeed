@@ -12,7 +12,7 @@ export function createPanorama(texture) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uMap: { value: texture }, uGain: { value: 1 }, uSunSurface: { value: SUN_SURFACE }, ...REL },
+    uniforms: { uMap: { value: texture }, uGain: { value: 1 }, uSunSurface: { value: SUN_SURFACE }, uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uEclN: { value: new THREE.Vector3(0, 0, 1) }, uZodi: { value: 0 }, ...REL },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
       void main() {
@@ -22,8 +22,20 @@ export function createPanorama(texture) {
     fragmentShader: /* glsl */ `
       ${RELATIVITY}
       uniform sampler2D uMap;
-      uniform float uGain, uSunSurface;
+      uniform float uGain, uSunSurface, uZodi;
+      uniform vec3 uSunDir, uEclN;   // toward the Sun from the camera; ecliptic north (world)
       varying vec3 vDir;
+      // Zodiacal light: sunlight scattered by the dust between the planets. Brightest toward the Sun,
+      // concentrated along the ecliptic, with the faint gegenschein straight opposite the Sun (a simple
+      // fit to the measured shape; uZodi carries the fall-off with distance from the Sun).
+      vec3 zodiacal(vec3 n) {
+        float ce = clamp(dot(n, uSunDir), -1.0, 1.0), e = acos(ce);
+        float sb = abs(dot(n, uEclN));                     // |sin(ecliptic latitude)|
+        float band = exp(-sb / mix(0.22, 0.5, smoothstep(1.2, 0.3, e)));   // fatter near the Sun
+        float I = band * pow(max(sin(e), 0.08), -2.3) * smoothstep(0.08, 0.35, e);
+        I += 0.35 * exp(-pow((3.14159 - e) / 0.18, 2.0)) * exp(-sb / 0.12);   // gegenschein
+        return vec3(1.0, 0.92, 0.8) * I * uZodi;
+      }
       const float PI = 3.141592653589793;
       void main() {
         vec3 np = normalize(vDir);
@@ -36,7 +48,7 @@ export function createPanorama(texture) {
         vec2 dx = dFdx(uv), dy = dFdy(uv), dxa = dFdx(uvAlt), dya = dFdy(uvAlt);
         if (dot(dxa, dxa) < dot(dx, dx)) dx = dxa;
         if (dot(dya, dya) < dot(dy, dy)) dy = dya;
-        vec3 col = textureGrad(uMap, uv, dx, dy).rgb * uGain * 0.1;
+        vec3 col = textureGrad(uMap, uv, dx, dy).rgb * uGain * 0.1 + zodiacal(n);
         if (uBeta > 1e-4) {
           col *= dopplerTint(D, 6000.0);
           // CMB: 2.725 K blackbody, shifted to temperature D·2.725 K, scaled relative to the Sun's surface
