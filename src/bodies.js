@@ -410,14 +410,52 @@ const GLARE_FRAG = /* glsl */ `
 varying vec3 vColor;
 void main() {
   #include <logdepthbuf_fragment>
+  // as a camera records a very bright star: a hot core, a soft photographic falloff and six thin
+  // diffraction spikes (a six-bladed aperture), all fading out at the sprite's edge
   vec2 c = gl_PointCoord * 2.0 - 1.0;
   float r = length(c);
   if (r > 1.0) discard;
-  float core = exp(-r * r * 40.0);
-  float halo = 0.06 * pow(max(1.0 - r, 0.0), 3.0);
-  // 4 faint diffraction spikes
-  float spikes = 0.04 * pow(max(1.0 - r, 0.0), 2.0) * (exp(-abs(c.x) * 60.0) + exp(-abs(c.y) * 60.0));
+  float edge = pow(1.0 - r, 2.0);
+  float core = exp(-r * r * 60.0);
+  float halo = (0.22 * exp(-r * 14.0) + 0.05 * exp(-r * 4.5)) * edge;
+  float a = atan(c.y, c.x) + 0.26, spikes = 0.0;
+  for (int k = 0; k < 3; k++) spikes += exp(-abs(r * sin(a - float(k) * 1.0472)) * 260.0);
+  spikes *= 0.16 * edge * smoothstep(0.0, 0.04, r);
   gl_FragColor = vec4(vColor * (core + halo + spikes), 1.0);
+}`;
+
+const smoothstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// The corona, as a coronagraph or an eclipse shows it: streamers out to ~4 solar radii, fading roughly
+// as r^-2.6. A camera-facing quad around the star; drawn only once the disk is resolved.
+const CORONA_VERT = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+${RELATIVITY}
+${MESH_ABERRATION}
+uniform float uR;
+varying vec2 vC;
+void main() {
+  vC = position.xy * 4.0;                         // in stellar radii
+  vec4 wp = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  vec4 mv = viewMatrix * vec4(aberratePos(wp.xyz), 1.0);
+  mv.xy += vC * uR;
+  gl_Position = projectionMatrix * mv;
+  #include <logdepthbuf_vertex>
+}`;
+const CORONA_FRAG = /* glsl */ `
+#include <logdepthbuf_pars_fragment>
+${NOISE}
+uniform float uI;
+varying vec2 vC;
+void main() {
+  #include <logdepthbuf_fragment>
+  float r = length(vC);
+  if (r < 1.0 || r > 4.0) discard;
+  vec2 d = vC / r;
+  float streamers = 0.55 + 0.3 * snoise(vec3(d * 2.5, 1.7)) + 0.15 * snoise(vec3(d * 9.0, 4.2 + r * 0.3));
+  float k = pow(r, -2.6) * max(streamers, 0.0) * smoothstep(4.0, 2.4, r);
+  gl_FragColor = vec4(vec3(1.0, 0.96, 0.9) * k * uI, 1.0);
 }`;
 
 export class Star {
@@ -441,6 +479,15 @@ export class Star {
     }));
     this.glare.frustumCulled = false;
     this.root.add(this.glare);
+    if (map) {
+      this.coronaU = { uR: { value: 1 }, uI: { value: 0 }, ...REL };
+      this.corona = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+        uniforms: this.coronaU, vertexShader: CORONA_VERT, fragmentShader: CORONA_FRAG,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      }));
+      this.corona.frustumCulled = false;
+      this.root.add(this.corona);
+    }
     this.color = new THREE.Color();
     const c = bbColorJS(temp);
     this.color.setRGB(c[0], c[1], c[2]);
@@ -454,10 +501,17 @@ export class Star {
     const I = 1.1 * Math.sqrt(Math.pow(10, -0.4 * m));
     const angR = (this.radius / distM) * pxPerRad;   // disk radius in px
     this.mesh.visible = angR > 0.3;
-    // glare: bright core for unresolved stars, broad soft halo for resolved ones
-    const size = Math.min(angR > 2 ? Math.min(angR * 9, 900) : Math.min(6 + 9 * Math.log(1 + I), 260), this.maxGlare || 1e9);
+    // glare sized by apparent brightness: ~240 px across for the Sun seen from Earth (m = −26.7),
+    // larger closer in, shrinking to a star-like point as it fades (from Pluto, m ≈ −19: ~40 px)
+    const R = Math.max(4, Math.min(420, 120 * Math.pow(10, -0.1 * (m + 26.74))));
+    const size = Math.min(Math.max(2 * R, angR * 6), this.maxGlare || 1e9);
     this.glareU.uSize.value = size * dpr;
     this.glareU.uIntensity.value = angR > 2 ? Math.min(I, 30) * 0.35 : Math.min(I, 300);
+    if (this.corona) {
+      this.coronaU.uR.value = this.root.scale.x;         // the drawn radius (place() may have shrunk it)
+      this.coronaU.uI.value = 1.6 * smoothstep(8, 40, angR);
+      this.corona.visible = this.coronaU.uI.value > 0.001;
+    }
   }
 }
 
