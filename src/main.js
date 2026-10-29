@@ -879,9 +879,13 @@ function frame(now) {
   const proj = pxPerRad * DPR;
   // layers faded to nothing are not drawn at all (the panorama covers the whole screen; the Milky Way
   // model is 310,000 points)
-  const mwFade = smoothstep(350, 2500, dSunPc) * keep, ext = smoothstep(150, 1500, dSunPc);
+  // well outside the disk the illustration of the whole galaxy takes over from the point model
+  const card = smoothstep(4000, 20000, dSunPc);
+  const mwFade = smoothstep(350, 2500, dSunPc) * (1 - card) * keep, ext = smoothstep(150, 1500, dSunPc);
   panorama.visible &&= pano > 0;
   galaxies.milkyway.visible &&= mwFade > 0;
+  galaxies.mwcard.visible &&= card > 0;
+  updateGalaxy(galaxies.mwcard, camPc, proj, card * keep);
   galaxies.andromeda.visible &&= ext > 0;
   updateGalaxy(galaxies.milkyway, camPc, proj, mwFade);
   updateGalaxy(galaxies.andromeda, camPc, proj, ext * keep);

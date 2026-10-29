@@ -48,16 +48,24 @@ function texture() {
 
 /** basis: [X (image right), Y (image up), Z (toward the viewer)] in world coordinates. */
 export function createAndromedaDisk(basis, centerPc) {
+  return createGalaxyCard(texture(), WIDTH_PC, HEIGHT_PC, basis, centerPc, 1.5);
+}
+
+/**
+ * An image of a galaxy mounted in 3-D: map (texture), its width and height in parsecs, basis
+ * [X (image right), Y (image up), Z (toward the viewer)], centre (pc) and brightness.
+ */
+export function createGalaxyCard(map, widthPc, heightPc, basis, centerPc, gain) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
-      uMap: { value: texture() }, uCenter: { value: new THREE.Vector3() }, uBasis: { value: new THREE.Matrix3() },
-      uGain: { value: 1.5 }, uFade: { value: 1 }, uProj: { value: 1 }, ...REL,
+      uMap: { value: map }, uCenter: { value: new THREE.Vector3() }, uBasis: { value: new THREE.Matrix3() },
+      uGain: { value: gain }, uFade: { value: 1 }, uProj: { value: 1 }, ...REL,
     },
     vertexShader: VERT, fragmentShader: FRAG,
     // opaque pass so it is drawn before (behind) planets and ships
     transparent: false, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
   });
-  const card = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH_PC, HEIGHT_PC, 48, 24), mat);
+  const card = new THREE.Mesh(new THREE.PlaneGeometry(widthPc, heightPc, 48, 48), mat);
   card.frustumCulled = false;
   card.renderOrder = -77;
   const g = new THREE.Group();

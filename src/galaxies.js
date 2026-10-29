@@ -3,7 +3,8 @@ import { RELATIVITY, REL } from './shaders/common.js';
 import { GALAXIES } from './destinations.js';
 import { PC, v3, DEG } from './constants.js';
 import { radecToVec } from './astro.js';
-import { createAndromedaDisk } from './andromeda.js';
+import { createAndromedaDisk, createGalaxyCard } from './andromeda.js';
+import { loadTexture } from './textures.js';
 
 // Procedural galaxies built from published structural parameters (scale lengths, bar, arm pitch,
 // inclination, position angle). Each particle is a star cloud of physical size `aSize` (pc);
@@ -142,7 +143,7 @@ void main() {
   if (r2 > 1.0) discard;
   float a = exp(-r2 * vSoft);
   // dust only absorbs: it dims what lies behind it and adds no light (against empty sky it is invisible)
-  if (uDust > 0.5) gl_FragColor = vec4(vec3(0.0), a * min(vColor.r, 1.0));
+  if (uDust > 0.5) gl_FragColor = vec4(vec3(0.0), 0.7 * a * min(vColor.r, 1.0));
   else gl_FragColor = vec4(vColor * a, 1.0);
 }`;
 
@@ -218,7 +219,15 @@ export function createGalaxies() {
   const Zc = v3.scale(L, -1);                                                // card faces the Solar System
   const andromeda = createAndromedaDisk([X, v3.cross(Zc, X), Zc], v3.scale(m31.center, 1 / PC));
 
-  return { milkyway, andromeda, ...createAndromedaSystem(basisM31()) };
+  // --- the Milky Way seen from outside: NASA/JPL-Caltech/ESO/R. Hurt's face-on illustration (eso1339g,
+  // drawn from Spitzer survey data; no one has photographed our galaxy from outside), seen from the
+  // north galactic pole. In the image the galactic centre is straight up from the Sun and longitude
+  // 90° (the way the Sun orbits) to the left; it is scaled so the Sun sits 8.18 kpc from the centre
+  // (0.189 of the frame width) and fades in only well outside the disk (main.js).
+  const mwCard = createGalaxyCard(loadTexture('textures/milkyway_faceon.jpg', { priority: 'low' }), 43300, 43300,
+    [basisMW[1], v3.scale(basisMW[0], -1), basisMW[2]], v3.scale(mw.center, 1 / PC), 1.1);
+  mwCard.children[0].renderOrder = -69; // after the point model's dust, which must not black out the image
+  return { milkyway, mwcard: mwCard, andromeda, ...createAndromedaSystem(basisM31()) };
 }
 
 // ---- Andromeda's surroundings, as a long exposure would record them (the eye would see only M31
