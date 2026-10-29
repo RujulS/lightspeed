@@ -8,11 +8,11 @@ export const SUN_SURFACE = 14.0;
 // Milky Way background (NASA SVS Deep Star Maps 2020, stars removed) — valid near the Sun only.
 // Also carries the cosmic microwave background, which Doppler-shifts into view at extreme speed.
 // ------------------------------------------------------------------------------------------------
-export function createPanorama(texture) {
+export function createPanorama(texture, halpha) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uMap: { value: texture }, uGain: { value: 1 }, uSunSurface: { value: SUN_SURFACE }, uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uEclN: { value: new THREE.Vector3(0, 0, 1) }, uZodi: { value: 0 }, ...REL },
+    uniforms: { uMap: { value: texture }, uGain: { value: 1 }, uSunSurface: { value: SUN_SURFACE }, uSunDir: { value: new THREE.Vector3(1, 0, 0) }, uEclN: { value: new THREE.Vector3(0, 0, 1) }, uZodi: { value: 0 }, uHa: { value: halpha }, uHaGain: { value: 1 }, ...REL },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
       void main() {
@@ -22,7 +22,8 @@ export function createPanorama(texture) {
     fragmentShader: /* glsl */ `
       ${RELATIVITY}
       uniform sampler2D uMap;
-      uniform float uGain, uSunSurface, uZodi;
+      uniform float uGain, uSunSurface, uZodi, uHaGain;
+      uniform sampler2D uHa;          // all-sky H-alpha (Finkbeiner 2003), asinh-encoded Rayleighs
       uniform vec3 uSunDir, uEclN;   // toward the Sun from the camera; ecliptic north (world)
       varying vec3 vDir;
       // Zodiacal light: sunlight scattered by the dust between the planets. Brightest toward the Sun,
@@ -49,6 +50,10 @@ export function createPanorama(texture) {
         if (dot(dxa, dxa) < dot(dx, dx)) dx = dxa;
         if (dot(dya, dya) < dot(dy, dy)) dy = dya;
         vec3 col = textureGrad(uMap, uv, dx, dy).rgb * uGain * 0.1 + zodiacal(n);
+        // glowing hydrogen (H II regions, the Gum Nebula, Barnard's Loop…): the red light of H-alpha,
+        // a little pinker with the H-beta that comes with it; brightness from the measured map
+        float ha = 2.0 * sinh(textureGrad(uHa, uv, dx, dy).r * 8.006);
+        col += vec3(1.0, 0.16, 0.26) * pow(ha, 0.55) * 0.0011 * uGain * uHaGain;
         if (uBeta > 1e-4) {
           col *= dopplerTint(D, 6000.0);
           // CMB: 2.725 K blackbody, shifted to temperature D·2.725 K, scaled relative to the Sun's surface

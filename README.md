@@ -38,6 +38,7 @@ Files you only want on your own machine go in `public/music/local/` with their o
 ## Credits
 
 - Planet textures: Solar System Scope (CC BY 4.0).
+- Glowing hydrogen in the sky: Finkbeiner (2003) all-sky H-alpha map, ApJS 146, 407, via NASA LAMBDA.
 - Milky Way: NASA/Goddard SVS Deep Star Maps 2020 (the sky from inside); NASA/JPL-Caltech/ESO/R. Hurt illustration eso1339g, CC BY 4.0 (seen from outside).
 - Voyager and Parker models: NASA 3D Resources.
 - Star catalogue: HYG Database v4.1 (CC BY-SA 4.0).

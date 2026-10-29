@@ -51,7 +51,7 @@ const envSkyP = loadTextureAsync('textures/milkyway_eq_2k.jpg', { priority: 'hig
 const starBufP = fetch('data/stars.bin', { priority: 'high' }).then((r) => r.arrayBuffer());
 const namedP = fetch('data/named.json').then((r) => r.json()).catch(() => []);
 preloadTextures('saturn'); // the menu opens on Saturn
-const panorama = createPanorama(skyTex);
+const panorama = createPanorama(skyTex, loadTexture('textures/halpha_eq.jpg', { srgb: false, priority: 'low' }));
 scene.add(panorama);
 lens.uniforms.tSky.value = skyTex;
 
