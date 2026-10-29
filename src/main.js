@@ -992,19 +992,28 @@ function frame(now) {
     if (!app.quatInit) { app.quat.copy(q); app.quatInit = true; }
     app.quat.rotateTowards(q, dt * 0.45); // turns (the flip, entering orbit) at a steady, visible ~26°/s
     probeRoot.quaternion.copy(app.quat);
-    const bubble = st.warp > 0 ? st.warp / app.probe.speed : 0; // 0 … 1 as the bubble spools up and down
+    const bubble = st.field || 0;                               // 0 … 1: how far the bubble's wall is up
+    const motion = st.warp > 0 ? st.warp / app.probe.speed : 0; // 0 … 1: the bubble's speed, of its top speed
     pm.update(app.playing ? st.accel : 0, wall, app.warp, bubble);
     sound.warpHum(menu.visible || !app.playing ? 0 : bubble);
     if (bubble > 0.02 && !app.bubbleHeard && app.playing) { app.bubbleHeard = true; sound.warpUp(); }
+    // a burst of gravitational waves as the wall goes up or down, at its fastest change (half-way)
+    if (app.playing && (app.lastField ?? 0) < 0.5 !== bubble < 0.5 && Math.abs(bubble - (app.lastField ?? 0)) < 0.2) app.gwAt = wall;
+    app.lastField = bubble;
+    const gwAge = app.gwAt === undefined ? Infinity : wall - app.gwAt;
+    const gw = gwAge < 0.8 ? 0.006 * Math.exp(-gwAge / 0.15) * Math.sin(gwAge * 2 * Math.PI * 9) : 0;
     // the warp bubble as a lens around the ship, seen from outside (zoom inside it for the crew's view)
-    warpPass.enabled = bubble > 0.001 && v3.len(relW(st.pos)) > WARP_R * pm.length;
+    const lensOn = bubble > 0.001 && v3.len(relW(st.pos)) > WARP_R * pm.length;
+    warpPass.enabled = lensOn || gw !== 0;
     if (warpPass.enabled) {
       const u = warpPass.uniforms;
-      u.uActive.value = 1;
+      u.uActive.value = lensOn ? 1 : 0;
+      u.uGW.value = gw;
       u.uCenter.value.copy(probeRoot.position).applyMatrix4(camera.matrixWorldInverse);
       u.uAxis.value.set(...m.dir).transformDirection(camera.matrixWorldInverse);
       u.uR.value = WARP_R * pm.length;
-      u.uK.value = (0.3 + 0.08 * Math.log10(app.probe.speed)) * bubble; // bending (rad): 0.54 at 1,000 c
+      u.uA.value = 0.05 * bubble;                                            // the wall's bending at its edge (rad)
+      u.uK.value = (0.15 + 0.03 * Math.log10(app.probe.speed)) * motion;     // the motion's, in the wall (rad)
       u.uTime.value = wall;
       u.uInvProj.value.copy(camera.projectionMatrixInverse); u.uProj.value.copy(camera.projectionMatrix);
     }
@@ -1146,7 +1155,7 @@ function updateHUD(st) {
   let sub;
   if (app.prelaunch) sub = 'On the launch pad';
   else if (st.orbiting) sub = isFinite(m.orbit.P) ? `In orbit, once every ${fmtTime(m.orbit.P)}` : 'Holding position';
-  else if (st.warp > 0) sub = 'in a warp bubble · nothing felt aboard';
+  else if (st.field > 0) sub = 'in a warp bubble · nothing felt aboard';
   else if (st.beta < 0.01) sub = `${(v * 3.6).toLocaleString('en-US', { maximumFractionDigits: 0 })} km/h`;
   else sub = `${(v / 1e3).toLocaleString('en-US', { maximumFractionDigits: 0 })} km/s`;
   if (st.accel > 0 && !app.prelaunch) sub += ` · engines at ${(st.accel / G0).toLocaleString('en-US', { maximumFractionDigits: st.accel / G0 > 100 ? 0 : 2 })} g`;

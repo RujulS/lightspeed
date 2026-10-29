@@ -28,9 +28,11 @@ function missionEvents(m, tracker) {
     const dur = fmtTime(s.t1 - s.t0), p = s.phase;
     if (p?.type === 'warp') {
       const x = `${Math.round(m.probe.speed).toLocaleString('en-US')} × light speed`;
-      if (s.kind === 'accel') ev.push({ t: s.t0, tag: 'Warp', text: () => `The warp bubble forms: space ahead of it starts to contract and space behind to expand. Nothing aboard feels it.` });
+      if (s.kind === 'form') ev.push({ t: s.t0, tag: 'Warp', text: () => `The warp bubble forms around the ship, which is still at rest. Its wall of negative energy bends passing light outward, like a diverging lens.` });
+      else if (s.kind === 'accel') ev.push({ t: s.t0, tag: 'Warp', text: () => `The bubble starts to move: space ahead of it contracts and space behind expands. Nothing aboard feels it.` });
       else if (s.kind === 'cruise') ev.push({ t: s.t0 + 1, tag: 'Warp', text: () => `At warp: ${x} for the next ${dur}. Inside the bubble the ship is at rest, so its clock keeps Earth's time.` });
-      else ev.push({ t: s.t0, tag: 'Warp', text: () => `The bubble collapses to stop at ${dest}.` });
+      else if (s.kind === 'brake') ev.push({ t: s.t0, tag: 'Warp', text: () => `The bubble slows to stop at ${dest}.` });
+      else ev.push({ t: s.t0, tag: 'Warp', text: () => `The bubble collapses and lets the ship go at ${dest}.` });
       continue;
     }
     if (s.kind === 'coast') ev.push({ t: s.t0, tag: 'Stage', text: () => `Engines off. Coasting on a curved transfer orbit for ${dur}, steered only by ${m.dest.id === 'moon' ? 'Earth\'s' : 'the Sun\'s'} gravity.` });

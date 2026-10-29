@@ -129,20 +129,26 @@ export class Profile {
 
 // ---------------------------------------------------------------------------------------------
 // Warp: the bubble carries the ship at V (which may exceed c). Inside it the ship is at rest in flat
-// space: no acceleration is felt and its clock keeps Earth's time. The bubble spools up over WARP_SPOOL
-// (speed eased in smoothly), cruises, and collapses the same way at the destination; on a hop too
-// short for that, it peaks at V at the midpoint.
+// space: no acceleration is felt and its clock keeps Earth's time. The bubble's wall is raised first,
+// over WARP_FORM with the ship still at rest; then the bubble spools up over WARP_SPOOL (speed eased in
+// smoothly), cruises, slows the same way at the destination and the wall is let down at rest. On a hop
+// too short for the spool it peaks at V at the midpoint. `field` (0 … 1) is how far the wall is up.
 // ---------------------------------------------------------------------------------------------
-const WARP_SPOOL = 60;
+const WARP_SPOOL = 60, WARP_FORM = 4;
 
 export class WarpProfile {
   constructor(V, L) {
-    const Ts = Math.min(WARP_SPOOL, L / V), Tc = Math.max(0, (L - V * Ts) / V), d = (V * Ts) / 2;
-    this.V = V; this.L = L; this.Ts = Ts; this.Tc = Tc;
-    this.tArrive = 2 * Ts + Tc;
-    const ph = [{ type: 'warp', kind: 'accel', label: 'Warp bubble forming', t0: 0, dt: Ts, x0: 0, dx: d }];
-    if (Tc > 1) ph.push({ type: 'warp', kind: 'cruise', label: 'At warp', t0: Ts, dt: Tc, x0: d, dx: V * Tc });
-    ph.push({ type: 'warp', kind: 'brake', label: 'Bubble collapsing', t0: Ts + Tc, dt: Ts, x0: L - d, dx: d });
+    const F = WARP_FORM, Ts = Math.min(WARP_SPOOL, L / V), Tc = Math.max(0, (L - V * Ts) / V), d = (V * Ts) / 2;
+    this.V = V; this.L = L; this.F = F; this.Ts = Ts; this.Tc = Tc;
+    this.tStop = F + 2 * Ts + Tc;
+    this.tArrive = this.tStop + F;
+    const ph = [
+      { type: 'warp', kind: 'form', label: 'Warp bubble forming', t0: 0, dt: F, x0: 0, dx: 0 },
+      { type: 'warp', kind: 'accel', label: 'Bubble speeding up', t0: F, dt: Ts, x0: 0, dx: d },
+    ];
+    if (Tc > 1) ph.push({ type: 'warp', kind: 'cruise', label: 'At warp', t0: F + Ts, dt: Tc, x0: d, dx: V * Tc });
+    ph.push({ type: 'warp', kind: 'brake', label: 'Bubble slowing', t0: F + Ts + Tc, dt: Ts, x0: L - d, dx: d });
+    ph.push({ type: 'warp', kind: 'collapse', label: 'Bubble collapsing', t0: this.tStop, dt: F, x0: L, dx: 0 });
     ph.push({ type: 'coast', phi: 0, label: 'Arrived', t0: this.tArrive, dt: Infinity, x0: L, dx: 0, rest: true });
     for (const p of ph) p.tau0 = p.t0;
     this.phases = ph;
@@ -150,15 +156,18 @@ export class WarpProfile {
   }
 
   at(t) {
-    const { V, L, Ts, Tc, tArrive } = this;
+    const { V, L, F, Ts, Tc, tStop, tArrive } = this;
     t = Math.max(0, t);
     const ease = (u) => [V * (3 * u * u - 2 * u * u * u), V * Ts * (u * u * u - (u * u * u * u) / 2)]; // speed, distance
-    let v, x, label;
-    if (t < Ts) { [v, x] = ease(t / Ts); label = 'Warp bubble forming'; }
-    else if (t < Ts + Tc) { v = V; x = (V * Ts) / 2 + V * (t - Ts); label = 'At warp'; }
-    else if (t < tArrive) { const [vv, xx] = ease((tArrive - t) / Ts); v = vv; x = L - xx; label = 'Bubble collapsing'; }
-    else { v = 0; x = L; label = 'Arrived'; }
-    return { x, v, warp: v / C, phi: 0, tau: t, a: 0, label, flip: false, rest: t >= tArrive };
+    const smooth = (u) => u * u * (3 - 2 * u);
+    let v = 0, x = 0, field = 1, label;
+    if (t < F) { field = smooth(t / F); label = 'Warp bubble forming'; }
+    else if (t < F + Ts) { [v, x] = ease((t - F) / Ts); label = 'Bubble speeding up'; }
+    else if (t < F + Ts + Tc) { v = V; x = (V * Ts) / 2 + V * (t - F - Ts); label = 'At warp'; }
+    else if (t < tStop) { const [vv, xx] = ease((tStop - t) / Ts); v = vv; x = L - xx; label = 'Bubble slowing'; }
+    else if (t < tArrive) { x = L; field = smooth((tArrive - t) / F); label = 'Bubble collapsing'; }
+    else { x = L; field = 0; label = 'Arrived'; }
+    return { x, v, warp: v / C, field, phi: 0, tau: t, a: 0, label, flip: false, rest: t >= tArrive };
   }
 }
 
@@ -351,7 +360,7 @@ export class Mission {
     const vel = v3.scale(this.dir, beta * C);
     const noseDir = s.flip ? v3.scale(this.dir, -1) : this.dir;
     return {
-      pos, vel, beta, warp: s.warp, phi: s.phi, gamma: Math.cosh(s.phi), tau: s.tau, accel: Math.abs(s.a), label: s.label,
+      pos, vel, beta, warp: s.warp, field: s.field ?? 0, phi: s.phi, gamma: Math.cosh(s.phi), tau: s.tau, accel: Math.abs(s.a), label: s.label,
       thrustDir: s.a ? noseDir : null, noseDir, flip: s.flip, arrived: t >= this.tArrive,
       progress: Math.min(1, s.x / this.L),
     };
@@ -389,7 +398,7 @@ export class Mission {
   /** Top speed as a fraction of c (above 1 for a warp trip). */
   maxBeta() {
     if (this.mode === 'ballistic') return v3.len(this.v0) / C;
-    if (this.prof instanceof WarpProfile) return this.prof.at(this.prof.tArrive / 2).warp;
+    if (this.prof instanceof WarpProfile) return this.prof.V / C;
     return Math.max(...this.prof.phases.map((p) => Math.tanh(p.type === 'coast' ? p.phi : Math.max(Math.abs(p.p0), Math.abs(p.p1)))));
   }
   /** Ideal photon-rocket mass ratio m0/m1 = e^(Δφ) for the thrust phases (only meaningful for the antimatter ship). */

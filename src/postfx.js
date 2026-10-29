@@ -258,47 +258,77 @@ const LensShader = {
     }`,
 };
 
-// The warp bubble seen as a lens. Alcubierre's metric contracts space ahead of the bubble and expands
-// it behind (the expansion of the volume elements goes as the cosine of the angle from the direction of
-// travel, strongest at the wall). A sight line through the front of the bubble therefore sees the
-// background squeezed (pushed away from the axis: more sky in less of the picture, brighter and
-// bluer), through the back stretched (dimmer and redder), with most effect through the middle of the
-// bubble and a faint shimmer where it grazes the wall. From inside, every sight line leaves through the
-// wall: the sky is squeezed toward the front (done for all directions by the aberration code, see
-// main.js) and this pass adds only a little more. Illustrative: the exact image depends on the wall's
-// shape and thickness, which the theory leaves open.
+// The warp bubble seen as a lens, in two parts.
+// 1. The wall. The bubble is held up by a shell of negative energy, and that bends light outward, like
+//    a diverging lens. The energy sits in the wall and the bending is kept to sight lines that pass
+//    close to it (a soft band about a third of the radius either side), so the bubble shows as a rim of displaced
+//    sky. This is there as soon as the wall is up, with the ship still at rest. Lensing keeps surface
+//    brightness, so nothing is brightened.
+// 2. The motion. Alcubierre's metric contracts space ahead of the bubble and expands it behind, in
+//    proportion to the bubble's speed and only where the shape function changes: in the wall. A sight
+//    line through the front of the wall sees the background squeezed (brighter and bluer), through the
+//    back stretched (dimmer and redder).
+// Gravitational waves: a bubble at steady speed emits none, but raising or dropping the wall changes its
+// shape fast and gives off a burst (Clough, Dietrich & Khan 2024 simulated the collapse). It crosses the
+// view at light speed, so all that shows is a brief quadrupole wobble of the picture (uGW, from main.js).
+// From inside the shell the wall bends nothing (flat space within), every sight line leaves through
+// the wall and the sky is squeezed toward the front (the aberration code in main.js) plus a little
+// more here. Illustrative: the strength depends on how much negative energy the wall holds and its
+// shape, which the theory leaves open.
 const WarpShader = {
   uniforms: {
     tDiffuse: { value: null }, uActive: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uAxis: { value: new THREE.Vector3(0, 0, -1) },
-    uR: { value: 1 }, uK: { value: 0 }, uTime: { value: 0 }, uInvProj: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() },
+    uR: { value: 1 }, uK: { value: 0 }, uA: { value: 0 }, uGW: { value: 0 }, uTime: { value: 0 }, uInvProj: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() },
   },
   vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float uActive, uR, uK, uTime;
+    uniform float uActive, uR, uK, uA, uTime, uGW;
     uniform vec3 uCenter, uAxis;   // view space
     uniform mat4 uInvProj, uProj;
     varying vec2 vUv;
     void main() {
-      vec4 base = texture2D(tDiffuse, vUv);
+      // the gravitational-wave burst: stretch one way across the picture, squeeze the other
+      vec2 q = vUv - 0.5;
+      vec2 uv0 = 0.5 + q * (1.0 + uGW * vec2(1.0, -1.0));
+      vec4 base = texture2D(tDiffuse, uv0);
       if (uActive < 0.5) { gl_FragColor = base; return; }
       vec4 vv = uInvProj * vec4(vUv * 2.0 - 1.0, -1.0, 1.0);
       vec3 d = normalize(vv.xyz / vv.w);
       vec3 b = uCenter;
       float R2 = uR * uR, tca = dot(b, d), d2 = dot(b, b) - tca * tca;
       bool inside = dot(b, b) < R2;
-      if (d2 >= R2 || (!inside && tca < 0.0)) { gl_FragColor = base; return; }
-      float thc = sqrt(R2 - d2);
-      float cOut = dot((tca + thc) * d - b, uAxis) / uR;            // where the sight line leaves the bubble
-      float cIn = inside ? cOut : dot((tca - thc) * d - b, uAxis) / uR;
-      float chord = inside ? 1.0 : thc / uR;                        // 1 through the middle, 0 grazing
-      float w = inside ? 0.12 : chord;
-      float s = uK * w * 0.5 * (cIn + cOut);                         // + ahead (contraction), − behind (expansion)
-      vec3 perp = d - uAxis * dot(d, uAxis);
-      float pl = length(perp);
-      vec3 dd = pl > 1e-5 ? normalize(d + s * perp / pl) : d;
+      vec3 dd = d;
+      // 1. the wall's own bending: rotate the sight line away from the bubble's centre by α
+      if (!inside && tca > 0.0) {
+        float x = sqrt(max(d2, 0.0)) / uR;
+        float a = uA * exp(-pow((x - 1.0) / 0.32, 2.0));
+        vec3 cn = normalize(b);
+        float th = acos(clamp(dot(d, cn), -1.0, 1.0));
+        vec3 pd = d - cn * dot(d, cn);
+        if (length(pd) > 1e-6) dd = cn * cos(th + a) + normalize(pd) * sin(th + a);
+      }
+      // 2. the motion: squeezed ahead, stretched behind, for sight lines through or close past the wall.
+      // c is where along the axis the sight line meets the wall (its closest point when it misses), so
+      // the effect runs on smoothly past the edge instead of stopping there.
+      float s = 0.0, chord = 0.0, cOut = 0.0, x = sqrt(max(d2, 0.0)) / uR;
+      if (inside || tca > 0.0) {
+        float cIn;
+        if (d2 < R2) {
+          float thc = sqrt(R2 - d2);
+          cOut = dot((tca + thc) * d - b, uAxis) / uR;               // where the sight line leaves the bubble
+          cIn = inside ? cOut : dot((tca - thc) * d - b, uAxis) / uR;
+          chord = inside ? 1.0 : thc / uR;                           // 1 through the middle, 0 grazing
+        } else cOut = cIn = dot(tca * d - b, uAxis) / max(length(tca * d - b), 1e-6);
+        float w = inside ? 0.12 : exp(-pow((x - 1.0) / 0.32, 2.0));
+        s = uK * w * 0.5 * (cIn + cOut);                              // + ahead (contraction), − behind (expansion)
+        vec3 perp = dd - uAxis * dot(dd, uAxis);
+        float pl = length(perp);
+        if (pl > 1e-5) dd = normalize(dd + s * perp / pl);
+      }
+      if (dd == d) { gl_FragColor = base; return; }
       vec4 c = uProj * vec4(dd, 1.0);
-      vec2 uv = c.xy / c.w * 0.5 + 0.5;
+      vec2 uv = 0.5 + (c.xy / c.w * 0.5) * (1.0 + uGW * vec2(1.0, -1.0));
       // near the screen edge the bent sight line can point off the picture: fade back to the straight view
       vec2 e = min(uv, 1.0 - uv);
       float onScreen = c.w > 0.0 ? smoothstep(0.0, 0.03, min(e.x, e.y)) : 0.0;
@@ -306,10 +336,12 @@ const WarpShader = {
       col *= max(0.0, 1.0 + 1.5 * s);
       col *= mix(vec3(1.0), s > 0.0 ? vec3(0.75, 0.9, 1.35) : vec3(1.3, 0.9, 0.7), min(1.0, abs(s) * 2.5));
       // the wall: a faint shimmer, strongest where the sight line grazes it and over the two lobes
-      float graze = inside ? 0.0 : pow(1.0 - chord, 5.0);
-      float ripple = 0.5 + 0.5 * sin(36.0 * cOut - uTime * 2.0);
-      vec3 tint = cOut > 0.0 ? vec3(0.55, 0.75, 1.0) : vec3(1.0, 0.7, 0.55);
-      col += tint * uK * (graze * (0.3 + 0.35 * ripple) * 0.35 + 0.025 * abs(cOut) * chord);
+      if (!inside && tca > 0.0) {
+        float graze = exp(-pow((x - 1.0) / 0.25, 2.0));
+        float ripple = 0.5 + 0.5 * sin(10.0 * cOut - uTime * 1.5);
+        vec3 tint = mix(vec3(1.0, 0.7, 0.55), vec3(0.55, 0.75, 1.0), smoothstep(-0.3, 0.3, cOut));
+        col += tint * (uA * 1.5 + uK) * (graze * (0.3 + 0.2 * ripple) * 0.15 + 0.025 * abs(cOut) * chord);
+      }
       gl_FragColor = vec4(col, base.a);
     }`,
 };
