@@ -33,7 +33,9 @@ export function createPanorama(texture, halpha) {
         float ce = clamp(dot(n, uSunDir), -1.0, 1.0), e = acos(ce);
         float sb = abs(dot(n, uEclN));                     // |sin(ecliptic latitude)|
         float band = exp(-sb / mix(0.22, 0.5, smoothstep(1.2, 0.3, e)));   // fatter near the Sun
-        float I = band * pow(max(sin(e), 0.08), -2.3) * smoothstep(0.08, 0.35, e);
+        // the sunward rise goes as sin(e)^-2.3 out to 90°; past that sin(e) shrinks again, so it is held
+        // there and eases down to the faint minimum before the gegenschein
+        float I = band * pow(max(sin(min(e, 1.5708)), 0.08), -2.3) * smoothstep(0.08, 0.35, e) * (1.0 - 0.55 * smoothstep(1.57, 2.6, e));
         I += 0.35 * exp(-pow((3.14159 - e) / 0.18, 2.0)) * exp(-sb / 0.12);   // gegenschein
         return vec3(1.0, 0.92, 0.8) * I * uZodi;
       }
