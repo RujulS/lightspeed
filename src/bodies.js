@@ -58,6 +58,7 @@ uniform vec3 uPole;
 uniform vec2 uRing;          // inner, outer radius in planet radii (0 = none)
 uniform int uProc;           // 0 textured, 1 Pluto, 2 rocky exoplanet, 3 hazy moon (Titan)
 uniform vec3 uTint;
+uniform float uGas;          // 1 for the gas and ice giants
 varying vec3 vN;
 varying vec3 vObj;
 varying vec3 vWorld;
@@ -97,12 +98,27 @@ vec3 proceduralAlbedo(vec3 p) {
   return mix(col, vec3(0.03, 0.06, 0.1), sea * (1.0 - ice));
 }
 
+// Close up (a low flyby) a map is magnified past its own resolution and would go soft. Fine noise at
+// about the texel scale is mixed in once one texel spans more than ~2 screen pixels: turbulence
+// streaked along the cloud bands for the giants, a fine grain for rocky surfaces. It fades out with
+// distance, so planets seen whole look exactly as their maps.
+vec3 closeDetail(vec3 albedo, vec3 p) {
+  vec2 ts = vec2(textureSize(uDay, 0));
+  float pxPerTexel = 1.0 / max(length(fwidth(vUv) * ts), 1e-6);
+  float k = smoothstep(2.0, 8.0, pxPerTexel);
+  if (k <= 0.0) return albedo;
+  float f = ts.x / 6.2832;                                  // texels per radian on the surface
+  vec3 q = uGas > 0.5 ? vec3(p.x, p.y * 6.0, p.z) : p;     // giants: features drawn out along the bands
+  float n = snoise(q * f * 0.15) * 0.45 + snoise(q * f * 0.6) * 0.3 + snoise(q * f * 2.1) * 0.17 + snoise(q * f * 6.0) * 0.08;
+  return albedo * (1.0 + n * (uGas > 0.5 ? 0.3 : 0.26) * k);
+}
+
 void main() {
   #include <logdepthbuf_fragment>
   vec3 N = normalize(vN);
   vec3 V = normalize(-vWorld);
   vec3 L = normalize(uSunDir);
-  vec3 albedo = uProc == 0 ? texture2D(uDay, vUv).rgb * uTint : proceduralAlbedo(normalize(vLocal));
+  vec3 albedo = uProc == 0 ? closeDetail(texture2D(uDay, vUv).rgb * uTint, normalize(vLocal)) : proceduralAlbedo(normalize(vLocal));
   #ifdef EARTH
     vec3 mN = texture2D(uNormal, vUv).xyz * 2.0 - 1.0;
     N = perturb(vObj, N, vUv, normalize(vec3(mN.xy * 1.2, mN.z)));
@@ -123,6 +139,8 @@ void main() {
     }
   }
   vec3 col = albedo * uSunColor * lit * ringShadow * 1.05;
+  // near the day-night line sunlight crosses more air and reddens (rocky worlds with an atmosphere)
+  if (uGas < 0.5) col *= mix(vec3(1.0), vec3(1.0, 0.62, 0.38), min(uAtmoStrength, 1.0) * smoothstep(0.3, 0.0, NdL) * 0.8);
   #ifdef EARTH
     float ocean = texture2D(uSpec, vUv).r;
     vec3 H = normalize(L + V);
@@ -293,7 +311,7 @@ export class Planet {
       uPole: { value: pole },
       uRing: { value: new THREE.Vector2(look.ring ? look.ring[0] / radius : 0, look.ring ? look.ring[1] / radius : 0) },
       uProc: { value: look.proc || 0 },
-      uTint: { value: new THREE.Color(...(look.tint || [1, 1, 1])) },
+      uTint: { value: new THREE.Color(...(look.tint || [1, 1, 1])) }, uGas: { value: ['jupiter', 'saturn', 'uranus', 'neptune'].includes(id) ? 1 : 0 },
       ...REL,
     };
     this.uniforms = uniforms;
