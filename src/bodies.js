@@ -503,7 +503,9 @@ export class Star {
     this.mesh.visible = angR > 0.3;
     // glare sized by apparent brightness: ~240 px across for the Sun seen from Earth (m = −26.7),
     // larger closer in, shrinking to a star-like point as it fades (from Pluto, m ≈ −19: ~40 px)
-    const R = Math.max(4, Math.min(420, 120 * Math.pow(10, -0.1 * (m + 26.74))));
+    // …and for stars a fixed photographic scale on top, so the brightest-looking ones (m ≈ −1 … −6) carry
+    // a visible glow and spikes: ~6 px at m = −1, ~29 px at m = −4.4, at most 60 px
+    const R = Math.max(4, Math.min(420, Math.max(120 * Math.pow(10, -0.1 * (m + 26.74)), 6 * Math.pow(10, -0.2 * (Math.max(m, -6) + 1)))));
     const size = Math.min(Math.max(2 * R, angR * 6), this.maxGlare || 1e9);
     this.glareU.uSize.value = size * dpr;
     this.glareU.uIntensity.value = angR > 2 ? Math.min(I, 30) * 0.35 : Math.min(I, 300);

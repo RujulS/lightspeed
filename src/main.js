@@ -9,6 +9,7 @@ import { createGalaxies, updateGalaxy, M31_GROUP, GALAXY_SPLIT } from './galaxie
 import { Planet, Star, bbColorJS, textureProgress, preloadTextures } from './bodies.js';
 import { loadTexture, loadTextureAsync, useRenderer } from './textures.js';
 import { Sound, EFFECTS } from './audio.js';
+import { StarPasses } from './starpass.js';
 import { WorldLine } from './lines.js';
 import { MoonSystem } from './moons.js';
 import { ProbeModel } from './probes3d.js';
@@ -48,6 +49,7 @@ let skyLoaded = false;
 const skyTex = loadTexture('textures/milkyway_eq.jpg', { priority: 'low', done: () => { skyLoaded = true; } });
 const envSkyP = loadTextureAsync('textures/milkyway_eq_2k.jpg', { priority: 'high' }); // menu lighting until then
 const starBufP = fetch('data/stars.bin', { priority: 'high' }).then((r) => r.arrayBuffer());
+const namedP = fetch('data/named.json').then((r) => r.json()).catch(() => []);
 preloadTextures('saturn'); // the menu opens on Saturn
 const panorama = createPanorama(skyTex);
 scene.add(panorama);
@@ -57,6 +59,7 @@ loadText('Placing 109,000 stars…');
 const starBuf = await starBufP;
 const stars = createStarfield(starBuf, [[0, 0, 0], PROXIMA_PC]);
 scene.add(stars);
+const starPasses = new StarPasses(starBuf, await namedP, scene);
 
 loadText('Building galaxies…');
 const galaxies = createGalaxies();
@@ -225,6 +228,7 @@ async function startMission(destId, probeId, launchT, autoplay = true) {
   $('h-dest').textContent = app.dest.name;
   tracker.setMission(app.mission);
   passbys.setMission(app.mission, tracker);
+  starPasses.setMission(app.mission);
   app.flybys = passbys.flybyWindows();
   tracker.setFlybys(app.flybys.map((f) => f.tc));
   app.defaultFactor = Math.min(defaultFactor(app.dest, app.mission.t0), niceRate(Math.max(1, app.mission.tArrive / MIN_CRUISE)));
@@ -846,6 +850,18 @@ function frame(now) {
   const compW = bh1CompanionPos(app.t);
   const dComp = place(bhStar.root, compW, GAIA_BH1.companion.radius);
   bhStar.update(app.t, dComp, pxPerRad, DPR);
+  // real stars passing close to the route
+  starPasses.update(app.t - m.t0, v3.add(FOC, OFF), {
+    place, pxPerRad, dpr: DPR, simT: app.t,
+    label: menu.visible ? () => {} : (text, w) => label(text, relW(w), 'faint', beta, vdir),
+    onPass: (p) => {
+      if (!app.playing) return;
+      const mag = p.M + 5 * Math.log10(p.b / 10); // apparent magnitude at closest approach
+      const as = mag < -3.5 ? 'as bright as Venus in Earth’s sky' : mag < -1.46 ? 'brighter than Sirius, the brightest star seen from Earth' : 'one of the brightest stars in the sky';
+      facts.announce('Star pass', `Passing ${p.name} ${(p.b * 3.2616).toFixed(1)} light-years away, a real star from the catalogue. Right now it is ${as}.`);
+      sound.whoosh(0.5, { gain: 0.3, low: 250, high: 1300, len: 2.4 });
+    },
+  });
 
   // ---- orbits, moons & path
   orbitGroup.visible = app.showOrbits && dSun < 2000 * AU;
@@ -1205,7 +1221,7 @@ requestAnimationFrame(frame);
 $('loading').style.opacity = 0;
 setTimeout(() => $('loading').remove(), 900);
 // dev-only hook for scripted camera tours while tuning visuals
-if (import.meta.env.DEV) window.__ls = { renderer, composer, lens, bloom, sound, renderLowLayer, lowQuad, GALAXY_SPLIT, galaxies, mainPass, probePass, scene, probeScene, app, menu, passbys, radar, ctl, advance, camera };
+if (import.meta.env.DEV) window.__ls = { renderer, composer, lens, bloom, sound, starPasses, renderLowLayer, lowQuad, GALAXY_SPLIT, galaxies, mainPass, probePass, scene, probeScene, app, menu, passbys, radar, ctl, advance, camera };
 if (import.meta.env.DEV) addEventListener('message', async (e) => {
   const c = e.data && e.data.ls;
   if (!c) return;
