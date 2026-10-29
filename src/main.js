@@ -306,6 +306,7 @@ function turnToward(a, b, maxAng) {
 // Black hole: look at the hole with its companion star almost directly behind it
 function blackHoleView() {
   startBlend(8);
+  app.bhViewAt = wall;
   ctl.focus = 'dest'; setSeg('seg-focus', 'dest');
   ctl.mode = 'orbit'; setSeg('seg-cam', 'orbit');
   const toStar = v3.norm(v3.sub(bh1CompanionPos(app.t), GAIA_BH1.pos));
@@ -737,6 +738,9 @@ function frame(now) {
     const a = 1 - Math.exp(-dt * (app.cineTrack ? 6 : tracking ? 4 : 2.2));
     app.cineL1 = turnToward(app.cineL1, slerpV(app.cineL1, tgt, a), dt * (app.cineTrack ? 1.4 : 0.9));
     app.cineL = slerpV(app.cineL, app.cineL1, a);
+    // during a flyby the cinematic camera drops back, so the ship is a speck against the planet
+    const pullTo = ctl.mode === 'cine' && tracking ? 1 + 7 * fc.weight : 1;
+    ctl.pull = (ctl.pull || 1) + (pullTo - (ctl.pull || 1)) * (1 - Math.exp(-dt * 1.5));
   }
   if (ctl.blend) { ctl.yaw = ctl.tYaw; ctl.pitch = ctl.tPitch; } // the blend does the easing
   ctl.yaw += (ctl.tYaw - ctl.yaw) * k;
@@ -761,7 +765,7 @@ function frame(now) {
   if (Math.abs(v3.dot(f, up)) > 0.995) f = v3.norm(v3.add(f, [0.1, 0.1, 0]));
   const r = v3.norm(v3.cross(f, up)), u = v3.cross(r, f);
   const cp = Math.cos(ctl.pitch);
-  let off = v3.scale(v3.add(v3.add(v3.scale(f, -cp * Math.cos(ctl.yaw)), v3.scale(r, cp * Math.sin(ctl.yaw))), v3.scale(u, Math.sin(ctl.pitch))), ctl.dist);
+  let off = v3.scale(v3.add(v3.add(v3.scale(f, -cp * Math.cos(ctl.yaw)), v3.scale(r, cp * Math.sin(ctl.yaw))), v3.scale(u, Math.sin(ctl.pitch))), ctl.dist * (ctl.focus === 'probe' ? ctl.pull || 1 : 1));
   let camUp = u;
   if (ctl.blend) {
     const b = ctl.blend, e0 = Math.min(1, (wall - b.start) / b.dur), e = e0 * e0 * (3 - 2 * e0);
@@ -919,8 +923,18 @@ function frame(now) {
   // ---- probe
   const pm = app.model;
   if (pm) {
-    probeRoot.position.set(...relW(st.pos));
-    probeRoot.visible = !app.hideProbe && v3.len(relW(st.pos)) < pm.length * 4000;
+    let rel = relW(st.pos);
+    // At the black hole the close-up orbits the hole itself, so the ship holds station in the
+    // foreground of that view (gliding there with the camera), its silhouette against the disk.
+    if (app.dest.kind === 'blackhole' && st.arrived && ctl.focus === 'dest' && app.bhViewAt !== undefined) {
+      const e0 = Math.min(1, (wall - app.bhViewAt) / 8), e = e0 * e0 * (3 - 2 * e0), L = pm.length;
+      camera.getWorldDirection(tmpV);
+      const f = [tmpV.x, tmpV.y, tmpV.z], u = [camera.up.x, camera.up.y, camera.up.z], r = v3.norm(v3.cross(f, u));
+      const fg = v3.add(v3.add(v3.scale(f, 2.6 * L), v3.scale(r, -0.85 * L)), v3.scale(u, -0.12 * L)); // left of the hole, clear of the panels
+      rel = v3.add(v3.scale(rel, 1 - e), v3.scale(fg, e));
+    }
+    probeRoot.position.set(...rel);
+    probeRoot.visible = !app.hideProbe && v3.len(rel) < pm.length * 4000;
     let nose = st.noseDir;
     if (app.probe.id === 'voyager') nose = v3.norm(v3.sub(planetPos('earth', app.t), st.pos)); // high-gain antenna points home
     if (app.probe.id === 'parker') nose = v3.norm(v3.scale(st.pos, -1));                         // heat shield toward the Sun

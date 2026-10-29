@@ -6,7 +6,7 @@ import { niceRate } from './timeflow.js';
 import { MoonSystem, MOONS } from './moons.js';
 
 // Illustrative passbys. A real straight-line trip passes nowhere near the planets, so where the ship
-// crosses a planet's orbit a stand-in is placed beside the flight path (2.6 radii off it) and the ship
+// crosses a planet's orbit a stand-in is placed beside the flight path (1.14 radii off it, a low pass like Juno's or Cassini's) and the ship
 // flies past it at its real speed, in sim time. It comes into view from ~2,000 radii away and rushes in
 // at the trip's normal time flow; only within SLOW radii does time drop to a pass rate, so the close
 // pass is watchable, then it rushes off again (see flybyWindows). The asteroid belt and Oort cloud are scenery: real bodies there
@@ -15,17 +15,17 @@ import { MoonSystem, MOONS } from './moons.js';
 
 const ORBIT = { mercury: 0.387, venus: 0.723, mars: 1.524, jupiter: 5.203, saturn: 9.537, uranus: 19.19, neptune: 30.07, pluto: 39.48 };
 const FIELD_S = 9;    // seconds on screen per rock field
-const SIDE = 2.6;     // closest approach, in planet radii
+const SIDE = 1.1, LIFT = 0.3; // closest approach ≈ 1.14 radii (Jupiter: ~10,000 km above the clouds; Juno skims 4,000 km)
 const VIEW = 2000;    // in view while within this many radii (ahead or behind)
 const SLOW = 15;      // time slows only while the stand-in is within this many radii
 const PASS = 5;       // during the pass, the ship covers this many radii per screen second
 const ZAP = 300, ZAP_S = 0.3; // the rush in from 300 radii is given at least 0.3 s so it can be seen
 const LOOK = 1200;    // the cinematic camera starts turning toward a stand-in this many radii out…
 const HOLD = 1;       // …and keeps watching it for this many screen seconds after the slow pass
-// Up close the planet's direction swings round faster than any smooth camera can follow (up to ~110°/s
-// at 2.6 radii). The camera instead sweeps as if the planet passed CAM_SIDE radii out: same start and
+// Up close the planet's direction swings round faster than any smooth camera can follow (hundreds of °/s
+// at 1.14 radii). The camera instead sweeps as if the planet passed CAM_SIDE radii out: same start and
 // end, peaking at ~48°/s for a moment at closest approach, and staying within ~22° of the planet's
-// real direction while the planet is big in the view.
+// real direction while the planet (which now fills much of the sky) goes by.
 const CAM_SIDE = 6;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
@@ -155,7 +155,7 @@ export class Passbys {
     for (const e of this.events) {
       if (e.kind !== 'planet') continue;
       if (rel >= e.w0 && rel <= e.w1) {
-        if (!e.basis) e.basis = this.basis(ctx);
+        if (!e.basis) e.basis = this.basis(ctx, true);
         this.drawPlanet(e, rel, clock, ctx);
       } else if (e.basis) this.hidePlanet(e);
     }
@@ -164,7 +164,7 @@ export class Passbys {
     while (this.next < this.events.length && this.events[this.next].t <= rel) {
       const e = this.events[this.next++];
       // a field the ship has long left behind (the timeline jumped past it) is skipped, not played late
-      if (e.kind === 'field' && v3.len(ctx.st.pos) < 2 * e.r) this.queue.push(e);
+      if (e.kind === 'field' && v3.len(ctx.st.pos) < 1.3 * e.r) this.queue.push(e);
     }
     if (this.queue.length > 1) this.queue.splice(0, this.queue.length - 1);
     if (this.queue.length && !this.active.length) {
@@ -183,10 +183,17 @@ export class Passbys {
 
   // stand-ins move exactly opposite to the ship's travel (ahead → behind), on the side the camera is
   // looking toward, so they stay in view and agree with the motion from any viewpoint
-  basis(ctx) {
+  // dayside: a planet goes on the far side of the path from the Sun, so the pass is over its lit face
+  basis(ctx, dayside = false) {
     const f = ctx.travelDir;
     let side = v3.sub(ctx.camF, v3.scale(f, v3.dot(ctx.camF, f)));
     side = v3.len(side) > 0.15 ? v3.norm(side) : ctx.camR;
+    if (dayside) {
+      const toSun = v3.norm(v3.scale(ctx.st.pos, -1)), away = v3.scale(v3.sub(toSun, v3.scale(f, v3.dot(toSun, f))), -1);
+      // with the Sun nearly straight behind or ahead any side is lit alike: keep the camera's side
+      if (v3.len(away) > 0.05) side = v3.norm(v3.add(v3.scale(v3.norm(away), 0.85), v3.scale(side, 0.15)));
+      side = v3.norm(v3.sub(side, v3.scale(f, v3.dot(side, f))));
+    }
     return { f, side, up: v3.norm(v3.cross(f, side)) };
   }
 
@@ -194,7 +201,7 @@ export class Passbys {
     const p = this.planet(e.id), R = e.R, { f, side, up } = e.basis;
     // on a line parallel to the flight path; the ship covers it at its real speed
     const along = e.v * (e.t - rel);
-    const w = v3.add(v3.add(ctx.st.pos, v3.scale(side, SIDE * R)), v3.add(v3.scale(up, 0.35 * R), v3.scale(f, along)));
+    const w = v3.add(v3.add(ctx.st.pos, v3.scale(side, SIDE * R)), v3.add(v3.scale(up, LIFT * R), v3.scale(f, along)));
     p.root.visible = true;
     ctx.place(p.root, w, R);
     const sun = v3.norm(v3.scale(w, -1));
@@ -205,7 +212,7 @@ export class Passbys {
     const s = along / R, th = Math.atan2(CAM_SIDE, s);
     // sound: the whoosh is started ~1 screen second (5 radii at the pass rate) before closest approach
     if (!e.heard && s <= PASS && s > -SLOW) { e.heard = true; this.onPass?.(e); }
-    const out = v3.norm(v3.add(v3.scale(side, SIDE), v3.scale(up, 0.35)));
+    const out = v3.norm(v3.add(v3.scale(side, SIDE), v3.scale(up, LIFT)));
     const dir = v3.add(v3.scale(f, Math.cos(th)), v3.scale(out, Math.sin(th)));
     let weight;
     if (s > 0) { const u = Math.max(0, Math.min(1, (LOOK - s) / (0.5 * LOOK))); weight = u * u * (3 - 2 * u); }
