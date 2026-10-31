@@ -831,33 +831,677 @@ function antimatter() {
   return g;
 }
 
-// ---- Alcubierre warp ship, after NASA's IXS Enterprise concept (Harold White & Mark Rademaker, 2014):
-// a slender 120 m hull inside two flat rings that would shape the bubble; the rings glow while it is up
+// ---- Alcubierre warp starship — NASA IXS Enterprise (Dr. Harold White & Mark Rademaker, 2014)
+// Based on the White-Juday warp field interferometer design:
+// 1. Two thick toroidal negative-energy warp rings (fore & aft) with segmented interior field coils and equatorial seams.
+// 2. Streamlined aerofoil bridge/pylon wings structurally locking the central hull into both warp rings.
+// 3. Sleek forward command module with upper flight deck canopy and needle-like sensor/particle deflector spire.
+// 4. Midship service module wrapped in champagne-gold MLI thermal blankets and utility conduit channels.
+// 5. Radial cluster of 8 high-pressure cryogenic reactant tanks with structural tension rings and saddles.
+// 6. Aft tapering engineering hull with flush radiator panels, RCS thruster quads, and sub-light multi-engine propulsion bells.
+// 7. Dynamic warp field glow: inner coil cassettes and emitter conduits pulse with electric blue energy when bubble is up.
 function warpShip() {
   const g = new THREE.Group();
-  const white = M.white(), dark = M.dark(), steel = M.steel();
-  // hull: a lathe profile, pointed bow (+Z) to a squared stern
-  const prof = [[0, 62], [2.2, 58], [4.6, 50], [6.4, 38], [7.2, 20], [7.2, -30], [6.6, -46], [5.6, -55], [0, -55]].map(([r, z]) => new THREE.Vector2(r, z));
-  const hull = new THREE.Mesh(new THREE.LatheGeometry(prof, 64), white);
-  hull.rotation.x = Math.PI / 2; g.add(hull);
-  g.add(along(cyl(7.4, 7.4, 6, dark), 22));          // bridge band
-  g.add(along(cyl(5.8, 4.6, 8, steel), -58));        // conventional engine bell for in-system moves
-  // the two rings: flat bands, perpendicular to the hull, on four spokes each
-  const glow = new THREE.MeshStandardMaterial({ color: 0x3a4a66, metalness: 0.7, roughness: 0.35, emissive: 0x4fa8ff, emissiveIntensity: 0 });
-  const rings = [];
-  for (const [z, r] of [[18, 46], [-26, 46]]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 1.4, 16, 160), glow);
-    ring.scale.z = 3.2; // flattened into a band along the hull
-    ring.position.z = z; g.add(ring); rings.push(ring);
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      const s = new THREE.Mesh(new THREE.BoxGeometry(r - 7, 1.2, 3), steel);
-      s.position.set(Math.cos(a) * (r + 7) / 2, Math.sin(a) * (r + 7) / 2, z);
-      s.rotation.z = a; g.add(s);
+
+  // Aerospace materials
+  const hullWhite = new THREE.MeshStandardMaterial({ color: 0xdee4ea, metalness: 0.28, roughness: 0.38 });
+  const hullDark = new THREE.MeshStandardMaterial({ color: 0x22262e, metalness: 0.65, roughness: 0.45 });
+  const titanium = new THREE.MeshStandardMaterial({ color: 0xa4acb8, metalness: 0.9, roughness: 0.26 });
+  const goldMLI = new THREE.MeshStandardMaterial({ color: 0xb8924a, metalness: 0.85, roughness: 0.42 });
+  const tankMat = new THREE.MeshStandardMaterial({ color: 0xd6dce2, metalness: 0.35, roughness: 0.32 });
+  const tankStrap = new THREE.MeshStandardMaterial({ color: 0x68707c, metalness: 0.88, roughness: 0.25 });
+  const engineMat = new THREE.MeshStandardMaterial({ color: 0x24272e, metalness: 0.85, roughness: 0.38 });
+  const engineNozzle = new THREE.MeshStandardMaterial({ color: 0x6e7684, metalness: 0.92, roughness: 0.22 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x0c1218, metalness: 0.95, roughness: 0.08 });
+  const glow = new THREE.MeshStandardMaterial({
+    color: 0x1b3b5a, metalness: 0.5, roughness: 0.35,
+    emissive: 0x3898ff, emissiveIntensity: 0.0,
+  });
+
+  // ========== 1. TWO THICK TOROIDAL WARP RINGS (z = +16.0 & z = -22.0) ==========
+  const ringZPositions = [16.0, -22.0];
+  const ringR = 30.0;
+  const tubeR = 4.2;
+
+  for (const rz of ringZPositions) {
+    const ringGroup = new THREE.Group();
+    ringGroup.position.z = rz;
+
+    // Main thick aerodynamic torus ring body
+    const mainTorus = new THREE.Mesh(new THREE.TorusGeometry(ringR, tubeR, 32, 96), hullWhite);
+    ringGroup.add(mainTorus);
+
+    // Dark equatorial panel separation seam around outer perimeter
+    const seam = new THREE.Mesh(new THREE.TorusGeometry(ringR + tubeR + 0.02, 0.12, 8, 96), hullDark);
+    ringGroup.add(seam);
+
+    // Inner rim conduit channel
+    const innerRim = new THREE.Mesh(new THREE.TorusGeometry(ringR - tubeR + 0.3, 0.4, 12, 96), hullDark);
+    ringGroup.add(innerRim);
+
+    // Segmented negative-energy warp field coils (24 units lining inner perimeter)
+    const nCoils = 24;
+    const innerR = ringR - tubeR + 0.6; // ~26.4
+    for (let i = 0; i < nCoils; i++) {
+      const a = (i / nCoils) * Math.PI * 2;
+      // Structural bracket/heatsink
+      const bracket = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.85, 4.4), titanium);
+      bracket.position.set(Math.cos(a) * innerR, Math.sin(a) * innerR, 0);
+      bracket.rotation.z = a;
+      ringGroup.add(bracket);
+
+      // Inner emissive warp emitter cassette pad
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.22, 3.6), glow);
+      pad.position.set(Math.cos(a) * (innerR + 0.4), Math.sin(a) * (innerR + 0.4), 0);
+      pad.rotation.z = a;
+      ringGroup.add(pad);
+
+      // Flanking power conduit clamps
+      for (const dz of [-1.6, 1.6]) {
+        const clamp = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.95, 0.35), hullDark);
+        clamp.position.set(Math.cos(a) * innerR, Math.sin(a) * innerR, dz);
+        clamp.rotation.z = a;
+        ringGroup.add(clamp);
+      }
+    }
+
+    g.add(ringGroup);
+  }
+
+  // ========== 2. PYLONS / WING AEROFOILS BRIDGING HULL & RINGS ==========
+  // Fore Ring Horizontal Pylons (z = +16.0)
+  for (const s of [-1, 1]) {
+    const pylonLen = 22.0;
+    const pylonX = s * (4.2 + pylonLen / 2);
+    const pylon = new THREE.Mesh(new THREE.BoxGeometry(pylonLen, 1.4, 7.5), hullWhite);
+    pylon.position.set(pylonX, 0, 16.0);
+    g.add(pylon);
+
+    // Tapered leading/trailing edge trim
+    const leadEdge = new THREE.Mesh(new THREE.BoxGeometry(pylonLen, 0.45, 1.0), hullDark);
+    leadEdge.position.set(pylonX, 0, 16.0 + 3.8);
+    g.add(leadEdge);
+
+    // Root fairings where pylon blends into ring inner rim
+    const fairing = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 4.5, 3.5, 16), hullWhite);
+    fairing.rotation.z = s * Math.PI / 2;
+    fairing.position.set(s * 25.5, 0, 16.0);
+    g.add(fairing);
+  }
+
+  // Aft Ring Horizontal & Diagonal Bracing Pylons (z = -22.0)
+  for (const s of [-1, 1]) {
+    const pylonLen = 22.2;
+    const pylonX = s * (4.0 + pylonLen / 2);
+    const pylon = new THREE.Mesh(new THREE.BoxGeometry(pylonLen, 1.5, 6.8), hullWhite);
+    pylon.position.set(pylonX, 0, -22.0);
+    g.add(pylon);
+
+    const leadEdge = new THREE.Mesh(new THREE.BoxGeometry(pylonLen, 0.45, 0.9), hullDark);
+    leadEdge.position.set(pylonX, 0, -22.0 + 3.5);
+    g.add(leadEdge);
+
+    const fairing = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 4.2, 3.5, 16), hullWhite);
+    fairing.rotation.z = s * Math.PI / 2;
+    fairing.position.set(s * 25.5, 0, -22.0);
+    g.add(fairing);
+
+    // Vertical structural tension struts inside the aft ring
+    for (const vy of [-1, 1]) {
+      const strutLen = 21.0;
+      const strutY = vy * (4.2 + strutLen / 2);
+      const vStrut = cyl(0.8, 0.8, strutLen, titanium, 16);
+      vStrut.position.set(0, strutY, -22.0);
+      g.add(vStrut);
     }
   }
+
+  // ========== 3. FORWARD COMMAND MODULE & BRIDGE DECK (z = +12 to +38) ==========
+  const bowProf = [
+    [0.1, 38], [1.8, 37], [3.2, 34], [4.4, 28], [4.8, 20], [4.6, 12]
+  ].map(([r, z]) => new THREE.Vector2(r, z));
+  const bowHull = new THREE.Mesh(new THREE.LatheGeometry(bowProf, 48), hullWhite);
+  bowHull.rotation.x = Math.PI / 2;
+  bowHull.scale.set(1.15, 0.85, 1.0);
+  g.add(bowHull);
+
+  // Upper bridge superstructure & cockpit canopy
+  const bridgeDeck = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.6, 11, 24), hullWhite);
+  bridgeDeck.rotation.x = Math.PI / 2;
+  bridgeDeck.position.set(0, 2.4, 26);
+  bridgeDeck.scale.set(1.4, 0.65, 1.0);
+  g.add(bridgeDeck);
+
+  // Flight deck cockpit windows (dark glass)
+  const canopy = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 2.2, 4.5, 16), glass);
+  canopy.rotation.x = Math.PI / 2;
+  canopy.position.set(0, 2.7, 29);
+  canopy.scale.set(1.35, 0.55, 1.0);
+  g.add(canopy);
+
+  // Dorsal sensor spine & comms blister
+  const dorsalSpine = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 14), hullDark);
+  dorsalSpine.position.set(0, 3.4, 20);
+  g.add(dorsalSpine);
+
+  // Ventral sensor blister / chin deflector
+  const chinDeflector = new THREE.Mesh(new THREE.SphereGeometry(1.8, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), hullDark);
+  chinDeflector.rotation.x = Math.PI;
+  chinDeflector.position.set(0, -2.4, 28);
+  g.add(chinDeflector);
+
+  // ========== 4. FORWARD SENSOR MAST & PARTICLE DEFLECTOR NEEDLE (z = +38 to +66) ==========
+  const mastZ0 = 38.0;
+  const mastZ1 = 65.0;
+  const mastLen = mastZ1 - mastZ0;
+
+  // Central tapering sensor probe needle
+  g.add(along(cyl(0.55, 0.12, mastLen, titanium, 24), (mastZ0 + mastZ1) / 2));
+
+  // 4 longitudinal sensor guide rods surrounding the needle
+  const rodR = 1.15;
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const rod = along(cyl(0.08, 0.08, mastLen - 5, titanium, 8), (mastZ0 + mastZ1 - 3) / 2);
+    rod.position.set(Math.cos(a) * rodR, Math.sin(a) * rodR, (mastZ0 + mastZ1 - 3) / 2);
+    g.add(rod);
+  }
+
+  // 3 transverse support spider rings along the needle boom
+  for (const sz of [44.0, 52.0, 60.0]) {
+    const spider = new THREE.Mesh(new THREE.TorusGeometry(rodR, 0.09, 8, 24), hullDark);
+    spider.position.z = sz;
+    g.add(spider);
+  }
+
+  // Spherical collector node at tip
+  const tipSphere = new THREE.Mesh(new THREE.SphereGeometry(0.65, 24, 16), titanium);
+  tipSphere.position.z = mastZ1;
+  g.add(tipSphere);
+
+  // Forward warp guide emitter tip (glows with warp energy)
+  const tipGlow = new THREE.Mesh(new THREE.SphereGeometry(0.38, 16, 12), glow);
+  tipGlow.position.z = mastZ1 + 0.45;
+  g.add(tipGlow);
+
+  // ========== 5. MIDSHIP HABITATION & REACTION MASS TANKS (z = -18 to +12) ==========
+  // Habitation & service module (z = +2 to +12)
+  const habLen = 10.0;
+  const habZ = 7.0;
+  // Champagne-gold thermal MLI blanket cylinder
+  g.add(along(cyl(4.5, 4.5, habLen, goldMLI, 48), habZ));
+  // Titanium end rings & service collar
+  g.add(along(cyl(4.58, 4.58, 0.8, titanium, 48), 12.0));
+  g.add(along(cyl(4.58, 4.58, 0.8, titanium, 48), 2.0));
+  // Longitudinal utility conduit raceways (4 quadrants)
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const raceway = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.45, habLen), hullDark);
+    raceway.position.set(Math.cos(a) * 4.6, Math.sin(a) * 4.6, habZ);
+    raceway.rotation.z = a;
+    g.add(raceway);
+  }
+
+  // Central spine core inside tank bay (z = -18 to +2)
+  const spineZ = -8.0;
+  const spineLen = 20.0;
+  g.add(along(cyl(2.6, 2.6, spineLen, hullDark, 32), spineZ));
+
+  // Radial cluster of 8 Cryogenic Reactant / Propellant Tanks
+  const nTanks = 8;
+  const tankClusterR = 4.3;
+  const tankR = 1.45;
+  const tankBodyLen = 14.0;
+  const tankZ = -8.0;
+
+  for (let i = 0; i < nTanks; i++) {
+    const a = (i / nTanks) * Math.PI * 2;
+    const tx = Math.cos(a) * tankClusterR;
+    const ty = Math.sin(a) * tankClusterR;
+
+    // Tank cylindrical body
+    const tBody = along(cyl(tankR, tankR, tankBodyLen, tankMat, 32), tankZ);
+    tBody.position.set(tx, ty, tankZ);
+    g.add(tBody);
+
+    // Domed hemispherical end caps
+    for (const dz of [-tankBodyLen / 2, tankBodyLen / 2]) {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(tankR, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), tankMat);
+      cap.rotation.x = dz > 0 ? -Math.PI / 2 : Math.PI / 2;
+      cap.position.set(tx, ty, tankZ + dz);
+      g.add(cap);
+    }
+
+    // High pressure cryogenic feed line into central spine at front
+    const feed = along(cyl(0.18, 0.18, 2.2, titanium, 12), tankZ + tankBodyLen / 2 + 0.8);
+    feed.position.set(tx * 0.75, ty * 0.75, tankZ + tankBodyLen / 2 + 0.8);
+    g.add(feed);
+  }
+
+  // 2 Heavy structural clamping girdles / retention cradles locking all 8 tanks
+  for (const gz of [-13.0, -3.0]) {
+    // Outer circular girdle ring
+    const girdle = new THREE.Mesh(new THREE.TorusGeometry(tankClusterR + tankR + 0.08, 0.35, 12, 48), tankStrap);
+    girdle.position.z = gz;
+    g.add(girdle);
+
+    // Radial spokes locking girdle to the spine
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.35, tankClusterR + tankR + 0.1, 0.6), titanium);
+      spoke.position.set(Math.cos(a) * (tankClusterR / 2), Math.sin(a) * (tankClusterR / 2), gz);
+      spoke.rotation.z = a;
+      g.add(spoke);
+    }
+  }
+
+  // ========== 6. AFT ENGINEERING & SUB-LIGHT PROPULSION (z = -18 to -58) ==========
+  // Tapering engineering fuselage (z = -18 to -48)
+  const engProf = [
+    [4.6, -18], [4.6, -24], [4.2, -32], [3.6, -40], [3.0, -48]
+  ].map(([r, z]) => new THREE.Vector2(r, z));
+  const engHull = new THREE.Mesh(new THREE.LatheGeometry(engProf, 48), hullWhite);
+  engHull.rotation.x = Math.PI / 2;
+  g.add(engHull);
+
+  // Longitudinal cooling radiator / thermal panels flush with hull
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const rad = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.2, 16.0), hullDark);
+    rad.position.set(Math.cos(a) * 3.8, Math.sin(a) * 3.8, -34.0);
+    rad.rotation.z = a;
+    g.add(rad);
+  }
+
+  // 4 Reaction Control System (RCS) thruster quads
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const rcsBase = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 1.2), titanium);
+    rcsBase.position.set(Math.cos(a) * 4.3, Math.sin(a) * 4.3, -28.0);
+    rcsBase.rotation.z = a;
+    g.add(rcsBase);
+
+    // Micro nozzles per quad
+    for (const nozAng of [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]) {
+      const noz = cyl(0.18, 0.08, 0.45, engineMat, 8);
+      noz.position.set(Math.cos(a) * 4.75, Math.sin(a) * 4.75, -28.0);
+      noz.rotation.z = a + nozAng;
+      g.add(noz);
+    }
+  }
+
+  // Aft thrust structure bulkhead (z = -48.0)
+  g.add(along(cyl(3.05, 3.05, 1.2, hullDark, 32), -48.0));
+
+  // Main central sub-light rocket engine
+  const mainNozzle = along(cyl(2.2, 1.2, 5.5, engineMat, 32), -51.5);
+  g.add(mainNozzle);
+  const mainThroat = along(cyl(2.05, 1.05, 5.2, engineNozzle, 32), -51.5);
+  g.add(mainThroat);
+
+  // 4 auxiliary vernier rocket engines arranged radially around main engine
+  const vRadius = 2.0;
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    const vx = Math.cos(a) * vRadius;
+    const vy = Math.sin(a) * vRadius;
+
+    const vNoz = along(cyl(0.85, 0.45, 3.8, engineMat, 24), -50.5);
+    vNoz.position.set(vx, vy, -50.5);
+    g.add(vNoz);
+
+    const vThroat = along(cyl(0.78, 0.38, 3.6, engineNozzle, 24), -50.5);
+    vThroat.position.set(vx, vy, -50.5);
+    g.add(vThroat);
+
+    // Turbopump feed line to each vernier
+    const pipe = along(cyl(0.14, 0.14, 2.8, titanium, 8), -48.8);
+    pipe.position.set(vx * 1.25, vy * 1.25, -48.8);
+    g.add(pipe);
+  }
+
+  // Spherical high-pressure helium pressurant tanks nestled around engine thrust frame
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const sph = new THREE.Mesh(new THREE.SphereGeometry(0.85, 16, 12), titanium);
+    sph.position.set(Math.cos(a) * 2.2, Math.sin(a) * 2.2, -47.0);
+    g.add(sph);
+  }
+
   g.userData.rings = glow;
-  g.userData.length = 120;
+  g.userData.length = 124;
+  return g;
+}
+
+// ---- USS Enterprise NCC-1701-A (Constitution-class Refit Starship)
+// Starfleet flagship commanded by Captain James T. Kirk.
+// Features: Primary saucer section with registration decals and bridge module, impulse engines,
+// forward-raked connecting neck with photon torpedo launchers, secondary stardrive hull with
+// navigational deflector dish, aft shuttlebay, swept warp pylons, and dual Constitution-refit warp nacelles
+// with illuminated inboard warp field coils and forward Bussard ramscoops.
+function enterprise() {
+  const g = new THREE.Group();
+  const ship = new THREE.Group();
+  g.add(ship);
+
+  // Materials
+  const hullWhite = new THREE.MeshStandardMaterial({ color: 0xedf0f5, metalness: 0.35, roughness: 0.38 }); // Federation aztec pearl-white
+  const hullDark = new THREE.MeshStandardMaterial({ color: 0x3d4452, metalness: 0.55, roughness: 0.42 });  // Engineering dark slate
+  const deflectorCopper = new THREE.MeshStandardMaterial({ color: 0xc87a2e, metalness: 0.9, roughness: 0.28 }); // Navigational deflector dish
+  const warpBlue = new THREE.MeshStandardMaterial({ color: 0x0088ff, emissive: 0x0099ff, emissiveIntensity: 1.8, roughness: 0.2 }); // Inboard warp grilles & deflector core
+  const impulseRed = new THREE.MeshStandardMaterial({ color: 0xff3311, emissive: 0xff2200, emissiveIntensity: 2.2, roughness: 0.25 }); // Impulse engine crystals & Bussards
+  const warpJetMat = new THREE.MeshStandardMaterial({ color: 0x00d4ff, emissive: 0x00c4ff, emissiveIntensity: 2.5, roughness: 0.2 }); // Nacelle aft exhaust jet emitters
+  const sensorGold = new THREE.MeshStandardMaterial({ color: 0xd4a038, metalness: 0.85, roughness: 0.35 });
+  const darkMetal = new THREE.MeshStandardMaterial({ color: 0x16181d, metalness: 0.8, roughness: 0.45 });
+
+  g.userData.enterpriseGlow = [warpBlue, impulseRed, warpJetMat];
+
+  // ========== 1. PRIMARY HULL (SAUCER SECTION) ==========
+  // Centered at Z = +68, Y = +11 (diameter ~140m)
+  const saucerZ = 68, saucerY = 11;
+  const saucerGroup = new THREE.Group();
+  saucerGroup.position.set(0, saucerY, saucerZ);
+
+  // Upper saucer hull: outer beveled rim
+  const outerRim = new THREE.Mesh(new THREE.CylinderGeometry(63, 70, 3.2, 72), hullWhite);
+  saucerGroup.add(outerRim);
+
+  // Upper saucer inward slope
+  const upperSlope = new THREE.Mesh(new THREE.CylinderGeometry(44, 63, 3.6, 72), hullWhite);
+  upperSlope.position.y = 1.8;
+  saucerGroup.add(upperSlope);
+
+  // Upper superstructure terrace (Decks 2 & 3)
+  const midTerrace = new THREE.Mesh(new THREE.CylinderGeometry(24, 44, 2.6, 64), hullWhite);
+  midTerrace.position.y = 3.6;
+  saucerGroup.add(midTerrace);
+
+  // Bridge module housing (Deck 1 teardrop structure)
+  const bridgeBase = new THREE.Mesh(new THREE.CylinderGeometry(8.5, 13.5, 2.0, 48), hullWhite);
+  bridgeBase.position.set(0, 5.0, -3.0);
+  bridgeBase.scale.set(1.0, 1.0, 1.45);
+  saucerGroup.add(bridgeBase);
+
+  // Bridge Dome (Main Bridge skylight)
+  const bridgeDome = new THREE.Mesh(new THREE.SphereGeometry(3.8, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.5), hullWhite);
+  bridgeDome.position.set(0, 5.9, -1.5);
+  saucerGroup.add(bridgeDome);
+
+  // Lower saucer hull: inward slope to lower decks
+  const lowerSlope = new THREE.Mesh(new THREE.CylinderGeometry(70, 42, 6.5, 72), hullWhite);
+  lowerSlope.position.y = -3.8;
+  saucerGroup.add(lowerSlope);
+
+  // Lower sensor platform (Decks 10 & 11)
+  const lowerPlat = new THREE.Mesh(new THREE.CylinderGeometry(42, 15, 3.8, 64), hullWhite);
+  lowerPlat.position.y = -7.4;
+  saucerGroup.add(lowerPlat);
+
+  // Ventral Planetary Sensor Dome
+  const ventralDome = new THREE.Mesh(new THREE.SphereGeometry(7.0, 32, 16, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5), sensorGold);
+  ventralDome.position.y = -8.5;
+  saucerGroup.add(ventralDome);
+
+  // Sensor dome center glow
+  const sensorCore = new THREE.Mesh(new THREE.SphereGeometry(2.5, 24, 12, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5), warpBlue);
+  sensorCore.position.y = -9.2;
+  saucerGroup.add(sensorCore);
+
+  // Saucer Registration Decal Disc (Sitting on upper hull)
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ebf0f5';
+    ctx.fillRect(0, 0, 1024, 1024);
+
+    // Subtle aztec panel lines
+    ctx.strokeStyle = '#d5dce4'; ctx.lineWidth = 4;
+    for (let r = 80; r < 480; r += 75) {
+      ctx.beginPath(); ctx.arc(512, 512, r, 0, Math.PI * 2); ctx.stroke();
+    }
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+      ctx.beginPath(); ctx.moveTo(512, 512); ctx.lineTo(512 + Math.cos(a) * 490, 512 + Math.sin(a) * 490); ctx.stroke();
+    }
+
+    // Starfleet Red Pennant stripes
+    ctx.fillStyle = '#cc2211';
+    ctx.fillRect(180, 500, 140, 14);
+    ctx.fillRect(704, 500, 140, 14);
+
+    // Bold registration text
+    ctx.fillStyle = '#111318';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 54px Arial, Helvetica, sans-serif';
+    ctx.letterSpacing = '6px';
+    ctx.fillText('U.S.S. ENTERPRISE', 512, 195);
+    ctx.font = 'bold 74px Arial, Helvetica, sans-serif';
+    ctx.letterSpacing = '8px';
+    ctx.fillText('NCC - 1701 - A', 512, 280);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const decalMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35, metalness: 0.25 });
+    const decalDisc = new THREE.Mesh(new THREE.CircleGeometry(63, 64), decalMat);
+    decalDisc.rotation.x = -Math.PI / 2;
+    decalDisc.rotation.z = Math.PI; // orient forward
+    decalDisc.position.y = 1.62;
+    saucerGroup.add(decalDisc);
+  } catch (e) {}
+
+  ship.add(saucerGroup);
+
+  // ========== 2. IMPULSE ENGINES (Aft of Saucer, Deck 7) ==========
+  const impulseGroup = new THREE.Group();
+  impulseGroup.position.set(0, saucerY + 2.5, saucerZ - 36);
+
+  // Aerodynamic housing
+  const impulseHousing = new THREE.Mesh(new THREE.BoxGeometry(16, 4.5, 18), hullWhite);
+  impulseGroup.add(impulseHousing);
+
+  // Dual glowing red impulse crystals
+  for (const sx of [-4.2, 4.2]) {
+    const crystal = new THREE.Mesh(new THREE.BoxGeometry(4.2, 2.2, 1.2), impulseRed);
+    crystal.position.set(sx, 0.2, -9.1);
+    impulseGroup.add(crystal);
+  }
+  ship.add(impulseGroup);
+
+  // ========== 3. CONNECTING DORSAL (THE NECK) ==========
+  // Swept-forward aerofoil pylon from saucer underside to engineering hull
+  const neckGroup = new THREE.Group();
+  neckGroup.position.set(0, saucerY - 14, saucerZ - 34);
+
+  const neckShape = new THREE.Shape();
+  neckShape.moveTo(0, 18);
+  neckShape.lineTo(-12, 0);
+  neckShape.lineTo(-32, 0);
+  neckShape.lineTo(-16, 18);
+  neckShape.closePath();
+
+  const neckGeo = new THREE.ExtrudeGeometry(neckShape, {
+    depth: 5.5,
+    bevelEnabled: true,
+    bevelSegments: 4,
+    steps: 1,
+    bevelSize: 0.6,
+    bevelThickness: 0.6,
+  });
+  neckGeo.center();
+  const neckMesh = new THREE.Mesh(neckGeo, hullWhite);
+  neckMesh.rotation.y = Math.PI / 2;
+  neckMesh.position.set(0, 0, 0);
+  neckGroup.add(neckMesh);
+
+  // Photon Torpedo Launcher housing (base of the neck)
+  const torpedoBay = new THREE.Mesh(new THREE.BoxGeometry(6.2, 4.2, 9), hullDark);
+  torpedoBay.position.set(0, -6.5, 10);
+  neckGroup.add(torpedoBay);
+
+  // Twin black launch tubes
+  for (const tx of [-1.5, 1.5]) {
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.8, 16), darkMetal);
+    tube.rotation.x = Math.PI / 2;
+    tube.position.set(tx, -6.5, 14.6);
+    neckGroup.add(tube);
+  }
+  ship.add(neckGroup);
+
+  // ========== 4. SECONDARY HULL (ENGINEERING SECTION) ==========
+  const engY = -15, engZ = -30;
+  const engGroup = new THREE.Group();
+  engGroup.position.set(0, engY, engZ);
+
+  // Forward cylindrical section
+  const fwdHull = new THREE.Mesh(new THREE.CylinderGeometry(11.2, 13.8, 32, 48), hullWhite);
+  fwdHull.rotation.x = Math.PI / 2;
+  fwdHull.position.z = 24;
+  engGroup.add(fwdHull);
+
+  // Navigational Deflector Housing
+  const deflectorCollar = new THREE.Mesh(new THREE.CylinderGeometry(13.8, 11.5, 4.5, 48), hullDark);
+  deflectorCollar.rotation.x = Math.PI / 2;
+  deflectorCollar.position.z = 41;
+  engGroup.add(deflectorCollar);
+
+  // Parabolic Copper Deflector Dish
+  const dish = new THREE.Mesh(new THREE.CylinderGeometry(11.5, 4.0, 4.8, 48, 1, true), deflectorCopper);
+  dish.rotation.x = -Math.PI / 2;
+  dish.position.z = 42;
+  engGroup.add(dish);
+
+  // Central glowing blue deflector emitter crystal
+  const deflectorEmitter = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 0.4, 3.6, 24), warpBlue);
+  deflectorEmitter.rotation.x = Math.PI / 2;
+  deflectorEmitter.position.z = 43.5;
+  engGroup.add(deflectorEmitter);
+
+  // Mid engineering hull
+  const midHull = new THREE.Mesh(new THREE.CylinderGeometry(13.8, 11.0, 48, 48), hullWhite);
+  midHull.rotation.x = Math.PI / 2;
+  midHull.position.z = -14;
+  engGroup.add(midHull);
+
+  // Aft tapered hull & undercut counter
+  const aftHull = new THREE.Mesh(new THREE.CylinderGeometry(11.0, 7.2, 42, 48), hullWhite);
+  aftHull.rotation.x = Math.PI / 2;
+  aftHull.position.z = -56;
+  engGroup.add(aftHull);
+
+  // Aft Shuttlebay Hangar (Z = -74)
+  const shuttleBay = new THREE.Mesh(new THREE.CylinderGeometry(7.0, 7.0, 8.0, 32, 1, false, 0, Math.PI), hullWhite);
+  shuttleBay.rotation.z = Math.PI / 2;
+  shuttleBay.position.set(0, 4.2, -73);
+  engGroup.add(shuttleBay);
+
+  // Clamshell hangar doors
+  const hangarDoor = new THREE.Mesh(new THREE.BoxGeometry(8.5, 6.0, 1.2), hullDark);
+  hangarDoor.position.set(0, 4.2, -77.2);
+  engGroup.add(hangarDoor);
+
+  ship.add(engGroup);
+
+  // ========== 5. WARP NACELLE PYLONS ==========
+  // Swept-back, upward-angled cantilever wings from secondary hull
+  const pylonGroup = new THREE.Group();
+  pylonGroup.position.set(0, engY + 5, engZ - 18);
+
+  for (const sign of [-1, 1]) {
+    const pylon = new THREE.Group();
+    // Swept pylon blade
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(36, 2.4, 18), hullWhite);
+    wing.position.set(sign * 21, 10.5, -4);
+    wing.rotation.z = sign * 0.52; // angled upwards ~30°
+    wing.rotation.y = -sign * 0.22; // swept backwards
+    pylon.add(wing);
+
+    // Dark trim accent on pylon
+    const pylonTrim = new THREE.Mesh(new THREE.BoxGeometry(36, 0.4, 4.5), hullDark);
+    pylonTrim.position.set(sign * 21, 11.2, -4);
+    pylonTrim.rotation.z = sign * 0.52;
+    pylonTrim.rotation.y = -sign * 0.22;
+    pylon.add(pylonTrim);
+
+    pylonGroup.add(pylon);
+  }
+  ship.add(pylonGroup);
+
+  // ========== 6. DUAL WARP NACELLES (PORT & STARBOARD) ==========
+  // Mounted at X = ±40, Y = +6, extending from Z = -155 to Z = +5
+  const nacelleSpan = 40.0;
+  const nacelleY = 7.5;
+  const nacelleZ = -45;
+
+  for (const sign of [-1, 1]) {
+    const nacelle = new THREE.Group();
+    nacelle.position.set(sign * nacelleSpan, nacelleY, nacelleZ);
+
+    // Main elongated nacelle body (length ~125m)
+    const nacelleBody = new THREE.Mesh(new THREE.BoxGeometry(7.8, 9.8, 120), hullWhite);
+    nacelle.add(nacelleBody);
+
+    // Beveled upper & lower curves
+    const upperCyl = new THREE.Mesh(new THREE.CylinderGeometry(3.9, 3.9, 118, 32), hullWhite);
+    upperCyl.rotation.x = Math.PI / 2;
+    upperCyl.position.y = 4.8;
+    nacelle.add(upperCyl);
+
+    const lowerCyl = new THREE.Mesh(new THREE.CylinderGeometry(3.9, 3.9, 118, 32), hullWhite);
+    lowerCyl.rotation.x = Math.PI / 2;
+    lowerCyl.position.y = -4.8;
+    nacelle.add(lowerCyl);
+
+    // Forward Bussard Ramscoop (glowing red dome at front of nacelle, Z = +62)
+    const bussard = new THREE.Mesh(new THREE.SphereGeometry(3.8, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5), impulseRed);
+    bussard.rotation.x = Math.PI / 2;
+    bussard.position.z = 60.5;
+    nacelle.add(bussard);
+
+    // Inboard Warp Field Grille (the iconic Star Trek blue warp glow, facing inwards)
+    const grille = new THREE.Mesh(new THREE.BoxGeometry(0.8, 4.2, 85), warpBlue);
+    grille.position.set(-sign * 3.9, 0, -2);
+    nacelle.add(grille);
+
+    // Aft Chiller Fin & Cap (Z = -63)
+    const aftFin = new THREE.Mesh(new THREE.BoxGeometry(6.5, 8.5, 8), darkMetal);
+    aftFin.position.z = -63;
+    nacelle.add(aftFin);
+
+    const aftExhaust = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.8, 4, 24), darkMetal);
+    aftExhaust.rotation.x = Math.PI / 2;
+    aftExhaust.position.z = -67.5;
+    nacelle.add(aftExhaust);
+
+    // Interior glowing warp jet nozzle emitter disc
+    const nozEmitter = new THREE.Mesh(new THREE.CircleGeometry(2.35, 24), warpJetMat);
+    nozEmitter.position.z = -69.2;
+    nacelle.add(nozEmitter);
+
+    // Outer flank dark accent band
+    const outerStripe = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.8, 90), hullDark);
+    outerStripe.position.set(sign * 3.92, 0, -2);
+    nacelle.add(outerStripe);
+
+    ship.add(nacelle);
+  }
+
+  // Scale internal geometry to true 305m Constitution-refit specifications, centered at origin
+  const SCALE_305 = 305.0 / 252.5;
+  ship.scale.setScalar(SCALE_305);
+  ship.position.z = -15.5 * SCALE_305;
+
+  // Warp effects (see createWarpDrive): nacelle jets from the aft nozzles, a nested field around the ship.
+  g.userData.warpDrive = {
+    nozzles: [[-40 * SCALE_305, 7.5 * SCALE_305, (-114.5 - 15.5) * SCALE_305], [40 * SCALE_305, 7.5 * SCALE_305, (-114.5 - 15.5) * SCALE_305]],
+    grilles: [[-36 * SCALE_305, 7.5 * SCALE_305, (-4.5 - 15.5) * SCALE_305], [36 * SCALE_305, 7.5 * SCALE_305, (-4.5 - 15.5) * SCALE_305]],
+    grilleLength: 85 * SCALE_305,
+    bussards: [[-40 * SCALE_305, 7.5 * SCALE_305, (17 - 15.5) * SCALE_305], [40 * SCALE_305, 7.5 * SCALE_305, (17 - 15.5) * SCALE_305]],
+    impulse: [0, 13.5 * SCALE_305, (-23 - 15.5) * SCALE_305],
+    field: { front: 260, R: 125, tail: 1800, wake: 45 },
+  };
+
+  g.userData.length = 305;
   return g;
 }
 
@@ -893,8 +1537,247 @@ function plume(spec) {
   return g;
 }
 
+let ORB_TEX = null;
+function orbTex() {
+  if (ORB_TEX) return ORB_TEX;
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, 'rgba(255,255,255,1.0)');
+  grd.addColorStop(0.25, 'rgba(255,255,255,0.85)');
+  grd.addColorStop(0.55, 'rgba(255,255,255,0.35)');
+  grd.addColorStop(0.85, 'rgba(255,255,255,0.08)');
+  grd.addColorStop(1.0, 'rgba(255,255,255,0.0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  ORB_TEX = new THREE.CanvasTexture(c);
+  return ORB_TEX;
+}
+
+// ------------------------------------------------------------------------------- Star Trek warp drive
+// Not physics: the look of the films. Two unbroken jets stream from the nacelles and draw together
+// far behind the ship, nested shells of warp field ripple from nose to tail, and the ship stretches and
+// flashes as it jumps to warp and drops out of it. The long distorted wake itself is drawn in postfx.js.
+const WARP_NOISE = /* glsl */ `
+  float hash3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+  float noise3(vec3 x) {
+    vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
+      mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+  }`;
+
+// A tube around the Z axis as (cos a, sin a, v): the vertex shaders below give it its real shape.
+function axialGrid(around, along) {
+  const pos = [], idx = [];
+  for (let j = 0; j <= along; j++) for (let i = 0; i <= around; i++) {
+    const a = (i / around) * Math.PI * 2;
+    pos.push(Math.cos(a), Math.sin(a), j / along);
+  }
+  for (let j = 0; j < along; j++) for (let i = 0; i < around; i++) {
+    const p = j * (around + 1) + i, q = p + around + 1;
+    idx.push(p, p + 1, q, p + 1, q + 1, q);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+// One continuous beam: soft across its width (bright where the sight line crosses most of it), so it has
+// no visible surface and no beads along it, only strands of plasma slowly streaming aft.
+function beam({ origin, length, r0, r1, color, core = color, gain = 1, soft = 2, fade = 1.5, flow = 1, strands = 0.5, converge = 0, wobble = 0, phase = 0 }) {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uOrigin: { value: new THREE.Vector3(...origin) }, uL: { value: length }, uR0: { value: r0 }, uR1: { value: r1 },
+      uColor: { value: new THREE.Color(...color) }, uCore: { value: new THREE.Color(...core) }, uGain: { value: gain }, uSoft: { value: soft }, uFade: { value: fade },
+      uFlow: { value: flow }, uStrands: { value: strands }, uConverge: { value: converge }, uWobble: { value: wobble }, uPhase: { value: phase },
+      uTime: { value: 0 }, uPower: { value: 0 }, uReach: { value: 1 },
+    },
+    vertexShader: /* glsl */ `
+      uniform vec3 uOrigin; uniform float uL, uR0, uR1, uConverge, uWobble, uPhase, uTime;
+      varying vec3 vN, vV, vDir; varying float vU;
+      void main() {
+        float u = pow(position.z, 1.7);
+        float s = u * u * (3.0 - 2.0 * u);
+        vec2 c = uOrigin.xy * (1.0 - uConverge * s);
+        c += uWobble * u * u * vec2(sin(u * 13.0 - uTime * 1.7 + uPhase), cos(u * 10.0 - uTime * 1.3 + uPhase * 1.7));
+        float r = mix(uR0, uR1, pow(u, 0.7)) * (1.0 + 0.07 * u * sin(u * 55.0 - uTime * 7.0 + uPhase));
+        vec4 mv = modelViewMatrix * vec4(c + r * position.xy, uOrigin.z - u * uL, 1.0);
+        vN = normalMatrix * vec3(position.xy, 0.0); vV = -mv.xyz; vDir = vec3(position.xy, 0.0); vU = u;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor, uCore; uniform float uL, uGain, uSoft, uFade, uFlow, uStrands, uPower, uReach, uTime, uPhase;
+      varying vec3 vN, vV, vDir; varying float vU;
+      ${WARP_NOISE}
+      void main() {
+        float ndv = min(abs(dot(normalize(vN), normalize(vV))), 1.0);
+        float body = pow(ndv, uSoft);
+        float end = pow(max(1.0 - vU, 0.0), uFade) * (1.0 - smoothstep(uReach * 0.55, uReach, vU));
+        float n = noise3(vec3(vDir.xy * 2.2 + uPhase, vU * uL * 0.009 - uTime * uFlow));
+        float strand = mix(1.0, 0.5 + n, uStrands * smoothstep(0.0, 0.2, vU));
+        vec3 col = mix(uCore, uColor, smoothstep(0.0, 0.3, vU) * 0.7 + (1.0 - ndv) * 0.3);
+        gl_FragColor = vec4(col * body * end * strand * uPower * uGain, 1.0);
+      }`,
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(axialGrid(24, 96), mat);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+// One shell of the warp field: an egg around the ship drawn out into a long tapering tail. Glass-like: clear
+// where it is seen face-on and lit along its edge, with rings of field rippling aft across it.
+function fieldShell({ front, R, tail, gain, phase, speed }) {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uFront: { value: front }, uR: { value: R }, uTail: { value: tail }, uGain: { value: gain }, uPhase: { value: phase }, uSpeed: { value: speed },
+      uTime: { value: 0 }, uForm: { value: 0 }, uReach: { value: 0 },
+    },
+    vertexShader: /* glsl */ `
+      uniform float uFront, uR, uTail, uForm, uReach;
+      varying vec3 vN, vV, vDir; varying float vZ, vT;
+      float zOf(float v, float tail) { return v < 0.3 ? uFront * cos(v / 0.3 * 1.5708) : -tail * pow((v - 0.3) / 0.7, 1.5); }
+      float rOf(float z, float tail) {
+        if (z > 0.0) { float f = z / uFront; return uR * sqrt(max(0.0, 1.0 - f * f)); }
+        float t = clamp(-z / tail, 0.0, 1.0);
+        return uR * pow(max(1.0 - t * t * (3.0 - 2.0 * t), 0.0), 1.25);
+      }
+      void main() {
+        float tail = uTail * (0.1 + 0.9 * uReach), form = mix(0.55, 1.0, uForm), v = position.z;
+        float z = zOf(v, tail), r = rOf(z, tail);
+        float z0 = zOf(max(v - 0.002, 0.0), tail), z1 = zOf(min(v + 0.002, 1.0), tail);
+        float dr = rOf(z1, tail) - rOf(z0, tail), dz = z1 - z0;
+        vec2 rz = normalize(vec2(-dz, dr));
+        vec4 mv = modelViewMatrix * vec4(position.xy * r * form, z * form, 1.0);
+        vN = normalMatrix * vec3(position.xy * rz.x, rz.y); vV = -mv.xyz; vDir = vec3(position.xy, 0.0); vZ = z;
+        vT = z < 0.0 ? -z / tail : 0.0;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uFront, uGain, uPhase, uSpeed, uTime, uForm;
+      varying vec3 vN, vV, vDir; varying float vZ, vT;
+      ${WARP_NOISE}
+      void main() {
+        float ndv = min(abs(dot(normalize(vN), normalize(vV))), 1.0);
+        float rim = pow(1.0 - ndv, 7.0);
+        float rings = pow(0.5 + 0.5 * sin(vZ * 0.035 + uTime * uSpeed + uPhase), 5.0);
+        float streams = noise3(vec3(vDir.xy * 2.6 + uPhase, vZ * 0.005 + uTime * 0.9));
+        streams = smoothstep(0.5, 0.85, streams);
+        float bow = vZ > 0.0 ? pow(vZ / uFront, 3.0) : 0.0;
+        float a = rim * (0.55 + 0.9 * bow) + rings * (0.012 + 0.2 * rim) + streams * (0.014 + 0.2 * rim);
+        a *= 1.0 - smoothstep(0.45, 1.0, vT);
+        vec3 col = mix(vec3(0.22, 0.56, 1.0), vec3(0.1, 0.24, 1.0), smoothstep(0.0, 0.7, vT));
+        col = mix(col, vec3(0.42, 0.26, 1.0), rim * 0.3);
+        gl_FragColor = vec4(col * a * uGain * uForm, 1.0);
+      }`,
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(axialGrid(64, 110), mat);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+function glowSprite(color, depthTest = true) {
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: orbTex(), color: new THREE.Color(...color), blending: THREE.AdditiveBlending, depthWrite: false, depthTest, transparent: true, opacity: 0 }));
+}
+
+function createWarpDrive(spec) {
+  const root = new THREE.Group(), stretched = new THREE.Group(), { field } = spec;
+  root.add(stretched);
+
+  // the jets: a hot core inside a blue sheath inside a wide faint halo, all stretching out with speed
+  const jets = [];
+  spec.nozzles.forEach((origin, i) => {
+    const phase = i * 2.4;
+    const common = { origin, converge: 0.92, phase };
+    jets.push(
+      beam({ ...common, length: 1000, r0: 2.4, r1: 1.6, color: [0.4, 0.78, 1.0], core: [1, 1, 1], gain: 1.9, soft: 1.8, fade: 1.8, flow: 2.2, strands: 0.2, wobble: 3 }),
+      beam({ ...common, length: 3000, r0: 5.5, r1: 11, color: [0.1, 0.48, 1.0], core: [0.3, 0.72, 1.0], gain: 1.15, soft: 2.2, fade: 1.5, flow: 1.6, strands: 0.8, wobble: 12 }),
+      beam({ ...common, length: 3600, r0: 14, r1: 42, color: [0.16, 0.2, 0.95], core: [0.15, 0.42, 1.0], gain: 0.42, soft: 2.8, fade: 1.7, flow: 1.0, strands: 0.9, wobble: 26 }),
+    );
+  });
+  // plasma running aft along the glowing inboard grilles of the nacelles
+  const grilles = spec.grilles.map((origin, i) => beam({ origin, length: spec.grilleLength, r0: 4.2, r1: 4.2, color: [0.2, 0.62, 1.0], core: [0.5, 0.85, 1.0], gain: 0.9, soft: 2.4, fade: 0.25, flow: 5, strands: 1, phase: i }));
+  // the impulse engines only push the ship up to the moment of the jump, then fall quiet
+  const impulse = beam({ origin: spec.impulse, length: 200, r0: 3, r1: 6, color: [1.0, 0.28, 0.05], core: [1.0, 0.75, 0.4], gain: 1.2, soft: 2, fade: 1.6, flow: 2, strands: 0.6 });
+  stretched.add(...jets, ...grilles, impulse);
+
+  const nozzleGlow = spec.nozzles.map((o) => { const s = glowSprite([0.55, 0.85, 1.0]); s.position.set(o[0], o[1], o[2] - 2); s.scale.setScalar(26); return s; });
+  const bussardGlow = spec.bussards.map((o) => { const s = glowSprite([1.0, 0.26, 0.1]); s.position.set(...o); s.scale.setScalar(36); return s; });
+  stretched.add(...nozzleGlow, ...bussardGlow);
+
+  // the nested field, outermost brightest
+  const shells = [
+    fieldShell({ ...field, gain: 0.55, phase: 0, speed: 3.2 }),
+    fieldShell({ ...field, front: field.front * 0.88, R: field.R * 0.82, tail: field.tail * 0.72, gain: 0.24, phase: 2.1, speed: 4.3 }),
+    fieldShell({ ...field, front: field.front * 0.76, R: field.R * 0.64, tail: field.tail * 0.48, gain: 0.14, phase: 4.2, speed: 5.5 }),
+  ];
+  stretched.add(...shells);
+
+  // the flash of the jump: a burst, a flare drawn out sideways, and a ring running out through space
+  const flashCore = glowSprite([0.75, 0.9, 1.0], false), flashStreak = glowSprite([0.45, 0.72, 1.0], false);
+  flashCore.position.z = flashStreak.position.z = -40;
+  const ring = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+    uniforms: { uAge: { value: 0 } },
+    vertexShader: 'varying vec2 vP; void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: /* glsl */ `
+      uniform float uAge; varying vec2 vP;
+      void main() {
+        float r = length(vP), w = 0.03 + 0.04 * uAge;
+        float a = exp(-pow((r - 0.86) / w, 2.0)) * (1.0 - smoothstep(0.92, 1.0, r)) * pow(1.0 - uAge, 2.0);
+        gl_FragColor = vec4(mix(vec3(0.75, 0.92, 1.0), vec3(0.3, 0.45, 1.0), uAge) * a * 2.2, 1.0);
+      }`,
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  }));
+  ring.position.z = -60;
+  ring.visible = flashCore.visible = flashStreak.visible = false;
+  root.add(flashCore, flashStreak, ring);
+
+  let power = 0, reach = 0, lastMotion = 0, flash = 1;
+  const FLASH_TIME = 1.3;
+  root.userData.field = field;
+
+  /** t: wall time; bubble, motion: 0…1 (wall up, speed of top speed); boost: extra power at the moment of launch */
+  root.userData.update = (t, dt, bubble, motion, boost) => {
+    if ((lastMotion < 0.002) !== (motion < 0.002) && dt < 0.5) flash = 0;
+    lastMotion = motion;
+    const k = 1 - Math.exp(-dt * 7);
+    power += (bubble * boost - power) * k;
+    reach += (motion - reach) * (1 - Math.exp(-dt * 3.5)); // the jets and tail shoot out behind the ship, and draw back in
+    root.visible = power > 0.004 || flash < 1;
+    if (!root.visible) return 1;
+
+    const pulse = 0.94 + 0.06 * Math.sin(t * 13);
+    for (const b of jets) {
+      const u = b.material.uniforms;
+      u.uTime.value = t; u.uPower.value = power * pulse; u.uReach.value = 0.05 + 0.95 * reach;
+    }
+    for (const b of grilles) { const u = b.material.uniforms; u.uTime.value = t; u.uPower.value = power; }
+    const iu = impulse.material.uniforms;
+    iu.uTime.value = t; iu.uPower.value = bubble * Math.max(0, 1 - motion * 4);
+    for (const s of nozzleGlow) s.material.opacity = Math.min(1, power) * pulse;
+    for (const s of bussardGlow) s.material.opacity = Math.min(1, power) * (0.72 + 0.1 * Math.sin(t * 9));
+    for (const s of shells) { const u = s.material.uniforms; u.uTime.value = t; u.uForm.value = bubble; u.uReach.value = reach; }
+
+    flash = Math.min(1, flash + dt / FLASH_TIME);
+    const live = flash < 1, e = Math.pow(1 - flash, 3);
+    flashCore.visible = flashStreak.visible = ring.visible = live;
+    if (live) {
+      flashCore.material.opacity = e; flashCore.scale.setScalar(260 + 520 * flash);
+      flashStreak.material.opacity = e; flashStreak.scale.set(1500 + 2200 * flash, 34, 1);
+      ring.scale.setScalar(60 + 1300 * Math.pow(flash, 0.6));
+      ring.material.uniforms.uAge.value = flash;
+    }
+    // the ship and its field seem to stretch away for the instant it goes to warp, and again as it drops out
+    const bell = 4 * motion * (1 - motion), stretch = 1 + 0.9 * bell * bell;
+    stretched.scale.z = stretch;
+    return stretch;
+  };
+  return root;
+}
+
 export class ProbeModel {
-  constructor(id) { this.id = id; this.group = new THREE.Group(); this.ready = this.build(); this.flash = 0; }
+  constructor(id) { this.id = id; this.group = new THREE.Group(); this.ready = this.build(); this.flash = 0; this.warpBlastTimer = 0; }
 
   async build() {
     let m;
@@ -902,27 +1785,55 @@ export class ProbeModel {
       const { url, length, fix } = id2glb[this.id];
       m = await loadGLB(url, length, fix);
       m.userData.length = length;
-    } else m = { orion, daedalus, starshot, antimatter, warp: warpShip }[this.id]();
+    } else m = { orion, daedalus, starshot, antimatter, warp: warpShip, enterprise }[this.id]();
     this.model = m;
     this.length = m.userData.length;
     this.group.add(m);
     if (m.userData.exhaust) { this.plume = plume(m.userData.exhaust); this.group.add(this.plume); }
+    if (m.userData.warpDrive) { this.warpDrive = createWarpDrive(m.userData.warpDrive); this.warpField = m.userData.warpDrive.field; this.group.add(this.warpDrive); }
     if (m.userData.pulse) {
-      this.pulseLight = new THREE.PointLight(0xfff1dd, 0, 400, 1.5);
+      this.pulseLight = new THREE.PointLight(0xffeedd, 0, 500, 1.4);
       this.pulseLight.position.z = -42;
       this.group.add(this.pulseLight);
-      this.pulseFlash = new THREE.Mesh(new THREE.SphereGeometry(6, 24, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(30, 26, 20), transparent: true, opacity: 0 }));
+      this.pulseFlash = new THREE.Mesh(
+        new THREE.SphereGeometry(6.5, 32, 16),
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(25, 20, 15),
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        })
+      );
       this.pulseFlash.position.z = -46;
       this.group.add(this.pulseFlash);
+      this.pulseTimer = 0.95;
     }
     return this;
   }
 
   /** thrusting: proper acceleration (m/s²) or 0; t: wall time seconds; warp: sim seconds per real second;
-   *  bubble: 0…1, how far the warp bubble is up (the warp ship's rings glow with it) */
-  update(accel, t, warp, bubble = 0) {
+   *  bubble: 0…1, how far the warp bubble is up (the warp ship's rings glow with it); dt: frame delta;
+   *  motion: 0…1, the bubble's speed, of its top speed */
+  update(accel, t, warp, bubble = 0, dt = 0.016, motion = 0) {
+    if (this.warpBlastTimer > 0) {
+      this.warpBlastTimer = Math.max(0, this.warpBlastTimer - dt);
+    }
     const rings = this.model?.userData.rings;
     if (rings) rings.emissiveIntensity += (bubble * (2.2 + 0.3 * Math.sin(t * 5)) - rings.emissiveIntensity) * 0.15;
+    const enterpriseGlow = this.model?.userData.enterpriseGlow;
+    if (enterpriseGlow) {
+      const warpOn = bubble > 0.01 || (warp && warp > 1);
+      const flare = (this.warpBlastTimer > 0) ? 2.6 : 1.0;
+      const targetIntensity = warpOn ? (3.4 * flare + 0.6 * Math.sin(t * 12)) : 0.8;
+      enterpriseGlow.forEach((mat) => {
+        mat.emissiveIntensity += (targetIntensity - mat.emissiveIntensity) * 0.18;
+      });
+    }
+    if (this.warpDrive) {
+      const boost = this.warpBlastTimer > 0 ? 1 + 0.5 * Math.min(1, this.warpBlastTimer) : 1;
+      this.model.scale.z = this.warpDrive.userData.update(t, dt, bubble, motion, boost);
+    }
     if (this.plume) {
       const P = this.plume.userData;
       P.power += ((accel > 0 ? 1 : 0) - P.power) * 0.1;
@@ -930,14 +1841,25 @@ export class ProbeModel {
       this.plume.children.forEach((sp, i) => { sp.material.opacity = P.power * sp.userData.k * (0.85 + 0.15 * Math.sin(t * 23 + i * 1.7)); });
     }
     if (this.pulseLight) {
-      // Orion detonates a pulse unit about once per second; at high time-warp the flashes merge
+      // Orion detonates a pulse unit about once per second (~0.95 s)
       const firing = accel > 0;
-      const rate = Math.min(warp * 1.0, 30);
-      if (firing && Math.random() < rate / 60) this.flash = 1;
-      this.flash *= 0.82;
-      this.pulseLight.intensity = this.flash * 2e5;
+      if (firing) {
+        if (this.pulseTimer === undefined) this.pulseTimer = 0.95;
+        this.pulseTimer += (dt || 0.016);
+        const PULSE_INTERVAL = 0.95;
+        if (this.pulseTimer >= PULSE_INTERVAL) {
+          this.pulseTimer = 0;
+          this.flash = 1.0;
+          this.onPulse?.();
+        }
+      } else {
+        this.pulseTimer = 0.95; // reset so next burn starts with an immediate blast
+      }
+      this.flash = (this.flash || 0) * 0.86;
+      if (this.flash < 0.005) this.flash = 0;
+      this.pulseLight.intensity = this.flash * 2.5e5;
       this.pulseFlash.material.opacity = this.flash;
-      this.pulseFlash.scale.setScalar(1 + (1 - this.flash) * 3);
+      this.pulseFlash.scale.setScalar(1 + (1 - this.flash) * 3.5);
     }
     if (this.model?.userData.spin) this.model.userData.spin.rotation.z = t * 0.21; // ~2 rpm → ~0.1 g at 28 m... shown sped up
   }

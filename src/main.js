@@ -18,7 +18,7 @@ import { $, fmtDist, fmtTime, fmtDate } from './ui.js';
 import { Tracker } from './tracker.js';
 import { Menu } from './menu.js';
 import { FactTicker } from './facts.js';
-import { defaultFactor, rateText, stepRate, niceRate, niceUp, humanScale } from './timeflow.js';
+import { defaultFactor, rateText, niceRate, niceUp, roundRate, stepSpeed, speedText, humanScale } from './timeflow.js';
 import { Passbys } from './passby.js';
 import { Radar } from './radar.js';
 
@@ -36,7 +36,7 @@ const sound = new Sound();
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.004, 1e16);
 const scene = new THREE.Scene();
 const probeScene = new THREE.Scene();
-const { composer, lens, warp: warpPass, bloom, mainPass, probePass } = createComposer(renderer, scene, probeScene, camera);
+const { composer, lens, warp: warpPass, warpTrek: warpTrekPass, bloom, mainPass, probePass } = createComposer(renderer, scene, probeScene, camera);
 
 const SQZ = 4e13; // beyond this, meshes are pulled in along the line of sight and shrunk (same angular size)
 
@@ -194,20 +194,42 @@ probeScene.add(probeRoot);
 
 // ============================================================================ state
 const app = {
-  t: t0Now, playing: false, warp: 1, factor: 1, defaultFactor: 1, flybys: [], mission: null, probe: null, dest: null, model: null,
-  arrivedShown: false, showDisk: true, showOrbits: true, showLabels: true, showMoons: true, quat: new THREE.Quaternion(),
+  t: t0Now, playing: false, warp: 1, factor: 1, speed: 1, tripScreen: 0, flybys: [], mission: null, probe: null, dest: null, model: null,
+  arrivedShown: false, showDisk: true, showOrbits: false, showLabels: true, showMoons: true, quat: new THREE.Quaternion(),
 };
 const models = {};
 async function getModel(id) {
-  if (!models[id]) { models[id] = new ProbeModel(id); await models[id].ready; }
+  if (!models[id]) {
+    models[id] = new ProbeModel(id);
+    await models[id].ready;
+    models[id].onPulse = () => sound.nuclearPulse(app.zoomFactor ?? 1.0);
+  }
   return models[id];
 }
 
 // mode: 'cine' (default: frames whatever is passing, otherwise looks ahead to the destination), 'chase' or
 // 'orbit'; pref is the user's pick, which the camera returns to after the launch and view changes
+// Calibrated camera framing distance for each spacecraft, accurately accounting
+// for 3D length and beam/width so vessels appear proportionally scaled.
+function probeCameraDist(id = app.probe?.id, factor = 1.0) {
+  const baseDists = {
+    parker: 16,
+    starshot: 20,
+    voyager: 42,
+    orion: 200,
+    warp: 280,
+    daedalus: 560,
+    enterprise: 600,
+    antimatter: 680,
+  };
+  const base = baseDists[id] ?? ((app.model?.length || 100) * 2.5);
+  return base * factor;
+}
+
 const ctl = { mode: 'cine', pref: 'cine', focus: 'probe', yaw: 0.55, pitch: 0.18, dist: 30, tYaw: 0.55, tPitch: 0.18, tDist: 30, idle: 0, lookMix: 0 };
 
 async function startMission(destId, probeId, launchT, autoplay = true) {
+  sound.stopAll();
   app.dest = destById(destId);
   app.probe = probeById(probeId);
   app.mission = new Mission(app.probe, app.dest, launchT, null);
@@ -216,12 +238,13 @@ async function startMission(destId, probeId, launchT, autoplay = true) {
   app.arrivedShown = false; app.bubbleHeard = false;
   $('arrive').classList.add('hidden');
   const m = await getModel(probeId);
+  m.onPulse = () => sound.nuclearPulse(app.zoomFactor ?? 1.0);
   probeRoot.clear();
   probeRoot.add(m.group);
   app.model = m;
   ctl.focus = 'probe'; setSeg('seg-focus', 'probe');
   ctl.mode = ctl.pref; setSeg('seg-cam', ctl.pref); ctl.frame = null;
-  ctl.tDist = ctl.dist = m.length * 2.6;
+  ctl.tDist = ctl.dist = probeCameraDist(probeId, 1.0);
   ctl.tYaw = ctl.yaw = 0.6; ctl.tPitch = ctl.pitch = 0.16;
   app.quat.identity(); app.quatInit = false;
   $('h-probe').textContent = app.probe.name;
@@ -231,10 +254,10 @@ async function startMission(destId, probeId, launchT, autoplay = true) {
   starPasses.setMission(app.mission);
   app.flybys = passbys.flybyWindows();
   tracker.setFlybys(app.flybys.map((f) => f.tc));
-  app.defaultFactor = Math.min(defaultFactor(app.dest, app.mission.t0), niceRate(Math.max(1, app.mission.tArrive / MIN_CRUISE)));
+  setTripFactor();
   radar.setMission(app.mission);
   facts.setMission(app.mission, tracker);
-  setFactor(app.defaultFactor);
+  setSpeed(1);
   app.phaseKey = null; app.squeezeShown = false;
   ctl.snap = true;
   $('b-disk').classList.toggle('hidden', app.dest.kind !== 'blackhole');
@@ -333,7 +356,7 @@ function arrivalView() {
   const o = app.mission.orbit;
   ctl.frame = { track: true, up: o ? o.n : ECLIPTIC_NORTH };
   ctl.tYaw = 0.35; ctl.tPitch = 0.18;
-  ctl.tDist = (app.model?.length || 10) * 3;
+  ctl.tDist = probeCameraDist(app.probe?.id, 1.15);
 }
 
 // Launch: camera beside the ship with Earth below, "up" on screen = away from Earth, so the ship
@@ -350,7 +373,7 @@ function launchView() {
   ctl.frame = { f: v3.norm(side), up };
   ctl.tYaw = ctl.yaw = 1.05;     // sun from the side
   ctl.tPitch = ctl.pitch = 0.78;  // above the ship, looking down past it at the curve of Earth
-  ctl.tDist = ctl.dist = app.model.length * 3.6;
+  ctl.tDist = ctl.dist = probeCameraDist(app.probe?.id, 1.35);
   ctl.snap = true;
 }
 // After liftoff: re-express the current camera offset in the chase frame, then ease behind the ship
@@ -359,7 +382,7 @@ function swingToChase(dur = 10) {
   startBlend(dur);
   ctl.mode = ctl.pref; setSeg('seg-cam', ctl.pref); ctl.frame = null;
   [ctl.tYaw, ctl.tPitch] = ctl.pref === 'cine' ? [0.32, 0.13] : [0.6, 0.16];
-  ctl.tDist = app.model.length * 2.6;
+  ctl.tDist = probeCameraDist(app.probe?.id, 1.0);
 }
 
 // Galaxy: orbit the ship with the whole galaxy framed behind it
@@ -374,7 +397,7 @@ function galaxyView() {
   const up2 = v3.norm(v3.cross(v3.norm(side), toG));
   ctl.frame = { f: toG, up: up2 };   // camera behind the ship, galaxy beyond it
   ctl.tYaw = 0.32; ctl.tPitch = 0.1;
-  ctl.tDist = (app.model?.length || 300) * 2.2;
+  ctl.tDist = probeCameraDist(app.probe?.id, 0.9);
 }
 
 // ============================================================================ helpers
@@ -496,8 +519,20 @@ $('b-go').onclick = async () => {
   const cd = $('countdown');
   cd.classList.remove('hidden', 'go');
   for (const n of ['3', '2', '1']) { cd.textContent = n; sound.beep(); await new Promise((r) => setTimeout(r, 800)); }
-  cd.textContent = 'LIFTOFF'; cd.classList.add('go');
-  sound.beep(true); sound.ignition();
+  const probe = app.probe;
+  const isEnterprise = probe && probe.id === 'enterprise';
+  const isWarp = probe && probe.scifi; // the jump to warp is the films'; a real bubble just forms, slowly
+  cd.textContent = isWarp ? 'WARP ENGAGE' : 'LIFTOFF';
+  cd.classList.add('go');
+  sound.beep(true);
+  const hasRocketIgnition = probe && probe.kind === 'thrust' && !['voyager', 'parker', 'warp', 'orion'].includes(probe.id);
+  if (hasRocketIgnition) sound.ignition(probe);
+  if (isEnterprise) {
+    sound.warpIgnition();
+    app.warpBlastAt = wall;
+    app.gwAt = wall;
+    if (app.model) app.model.warpBlastTimer = 4.0;
+  }
   app.prelaunch = false;
   $('missionbar').classList.remove('hidden'); $('mappanel').classList.remove('hidden');
   app.playing = true; $('b-play').textContent = '❚❚';
@@ -507,17 +542,21 @@ $('b-go').onclick = async () => {
 function setSeg(id, v) { $(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v)); }
 function setCam(v) {
   startBlend(2.5); ctl.mode = ctl.pref = v; ctl.frame = null; setSeg('seg-cam', v);
-  if (v !== 'orbit' && ctl.focus !== 'probe') { ctl.focus = 'probe'; setSeg('seg-focus', 'probe'); ctl.tDist = (app.model?.length || 10) * 2.6; }
+  if (v !== 'orbit' && ctl.focus !== 'probe') { ctl.focus = 'probe'; setSeg('seg-focus', 'probe'); ctl.tDist = probeCameraDist(app.probe?.id, 1.0); }
 }
 $('seg-cam').addEventListener('click', (e) => { const v = e.target.dataset.v; if (v) setCam(v); });
 $('seg-focus').addEventListener('click', (e) => {
   const v = e.target.dataset.v; if (!v) return;
   ctl.focus = v; setSeg('seg-focus', v); ctl.frame = null;
   if (v === 'dest' && app.dest.kind === 'blackhole') { blackHoleView(); return; }
-  ctl.tDist = focusRadius() * (v === 'probe' ? 5.5 : app.dest.kind === 'galaxy' && v === 'dest' ? 40 : 4);
+  ctl.tDist = v === 'probe' ? probeCameraDist(app.probe?.id, 1.0) : focusRadius() * (app.dest.kind === 'galaxy' && v === 'dest' ? 40 : 4);
   if (v !== 'probe') { ctl.mode = 'orbit'; setSeg('seg-cam', 'orbit'); }
 });
-$('b-new').onclick = () => { app.playing = false; app.prelaunch = false; menu.show(true); showRunUI(false); facts.hide(); for (const id of ['arrive', 'launchpad', 'info']) $(id).classList.add('hidden'); };
+$('b-new').onclick = () => {
+  sound.stopAll();
+  passbys.clear();
+  app.playing = false; app.prelaunch = false; menu.show(true); showRunUI(false); facts.hide(); for (const id of ['arrive', 'launchpad', 'info']) $(id).classList.add('hidden');
+};
 $('b-disk').onclick = () => { app.showDisk = !app.showDisk; $('b-disk').classList.toggle('on', app.showDisk); };
 $('b-play').onclick = togglePlay;
 function togglePlay() { if (app.prelaunch) return; app.playing = !app.playing; $('b-play').textContent = app.playing ? '❚❚' : '▶'; }
@@ -563,20 +602,21 @@ $('music-tracks').onclick = (e) => {
 };
 syncSound();
 sound.ready.then(renderTracks);
-passbys.onPass = () => sound.whoosh(1);
-passbys.onField = (dur) => sound.rocks(dur);
+passbys.onPass = () => sound.flyby();
+passbys.onRockPass = (gain = 0.65) => sound.flyby(gain, 'rocks');
+passbys.onHit = (intensity) => sound.shieldHit(intensity);
 $('b-info-close').onclick = () => $('info').classList.add('hidden');
-// the time factor: one setting for the whole trip, stepped with ‹ ›, Reset back to the default
-function setFactor(f, announce) {
-  app.factor = f;
-  $('tf-reset').classList.toggle('on', f === app.defaultFactor);
+// the user's speed: one multiplier on the whole timeline, stepped with ‹ ›, Reset back to 1×
+function setSpeed(v, announce) {
+  app.speed = v;
+  $('tf-reset').classList.toggle('on', v === 1);
   if (announce && app.mission && app.playing && !app.prelaunch) {
-    facts.announce('Time flow', `${rateText(f).replace(/^1 s/, '1 second')}. The whole trip now takes about ${fmtTime(screenTime(f))} on screen.`);
+    facts.announce('Speed', `${speedText(v)}: cruise, flybys, liftoff and arrival all change together. The whole trip now takes about ${fmtTime(screenTime())} on screen.`);
   }
 }
-$('tf-slow').onclick = () => setFactor(stepRate(app.factor, -1), true);
-$('tf-fast').onclick = () => setFactor(stepRate(app.factor, 1), true);
-$('tf-reset').onclick = () => setFactor(app.defaultFactor, true);
+$('tf-slow').onclick = () => setSpeed(stepSpeed(app.speed, -1), true);
+$('tf-fast').onclick = () => setSpeed(stepSpeed(app.speed, 1), true);
+$('tf-reset').onclick = () => setSpeed(1, true);
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape') openPop(null);
   if (e.target.tagName === 'INPUT') return;
@@ -598,8 +638,9 @@ addEventListener('resize', () => {
 // ============================================================================ main loop
 let last = performance.now(), hudTimer = 0, wall = 0;
 
-// ---- time flow: one factor for the whole trip (app.factor: per destination, stepped by the user),
-// with three slow-motion moments: liftoff, planet flybys and the final approach.
+// ---- time flow: the trip's timeline is one cruise factor (app.factor, set for each trip) with three
+// slow-motion moments: liftoff, planet flybys and the final approach. The user's speed (app.speed)
+// multiplies all of it, so slowing down slows the flybys as much as the cruise.
 const K_LIFT = 0.7, K_ARRIVE = 0.7; // ramps: elapsed (remaining) time grows (shrinks) e-fold per K screen seconds…
 const RAMP_MAX = 8;                  // …faster when needed, so neither ramp takes more than ~8 s
 // The ramps grow time exponentially, so on screen they give every tenfold step in distance about the
@@ -611,7 +652,8 @@ const rampK = (K) => Math.min(K, RAMP_MAX / Math.log(Math.max(Math.E, app.factor
 // the clock is a double near (launch + elapsed) s: each 1/60 s frame must move it by well over its
 // precision. Only where the clock is now matters, so on a billion-year trip the flybys near its start
 // still get their slow motion.
-const floorRate = (rel = app.mission.tArrive) => niceUp((Math.abs(app.mission.t0) + Math.max(0, rel)) * 2.2e-16 * 60 * 64);
+const clockFloor = (rel) => (Math.abs(app.mission.t0) + Math.max(0, rel)) * 2.2e-16 * 60 * 64;
+const floorRate = (rel = app.mission.tArrive) => niceUp(clockFloor(rel));
 function orbitRate() {
   const P = app.mission.orbit?.P;
   return Math.max(floorRate(), isFinite(P) ? niceRate(Math.max(1, P / 80)) : 1);
@@ -629,23 +671,49 @@ function flybyPhase(rel, baseRate) {
   }
   return bestFly ? { rate: bestRate, fly: bestFly } : null;
 }
-/** Rough screen time of the whole trip at factor F, slow-motion moments included. */
-function screenTime(F) {
-  const m = app.mission, k = Math.min(K_LIFT, RAMP_MAX / Math.log(Math.max(Math.E, F)));
-  const ramps = 2 * k * Math.log(Math.max(1, (F * k) / floorRate(0)));
-  return m.tArrive / F + ramps + app.flybys.reduce((s, f) => s + (f.durScreen || 9.8), 0);
+/** Screen time of the whole trip at the current speed. */
+const screenTime = () => app.tripScreen / app.speed;
+/** Plays the trip at 1× without drawing it (long steady stretches in one step): screen s in all and in flybys. */
+function measureTrip() {
+  const m = app.mission, speed = app.speed;
+  app.speed = 1;
+  let t = m.t0, total = 0, flyby = 0;
+  const cruiseEnd = m.tArrive - app.factor * rampK(K_ARRIVE);
+  for (let i = 0; i < 4e5 && t - m.t0 < m.tArrive; i++) {
+    const rel = t - m.t0, ph = phaseAt(rel);
+    let dt = 1 / 30;
+    if (ph.kind === 'cruise' && !app.flybys.some((f) => rel >= f.w0 && rel <= f.w1)) {
+      const stop = app.flybys.reduce((e, f) => (f.w0 > rel && f.w0 < e ? f.w0 : e), cruiseEnd);
+      if (stop > rel) dt = Math.max(dt, (stop - rel) / ph.rate);
+    }
+    t = advance(t, dt);
+    total += dt;
+    if (ph.kind === 'flyby') flyby += dt;
+  }
+  app.speed = speed;
+  return { total, flyby };
+}
+/** The trip's cruise factor, and how long the trip then takes on screen at 1×. */
+function setTripFactor() {
+  const T = app.mission.tArrive;
+  app.factor = Math.min(defaultFactor(app.dest, app.mission.t0), niceRate(Math.max(1, T / MIN_CRUISE)));
+  // the crossing gets at least as long as the flybys, or a fast ship would seem to go from one planet
+  // to the next and be at the stars seconds later
+  const { flyby } = measureTrip();
+  if (flyby > 0) app.factor = Math.min(app.factor, niceRate(Math.max(1, T / flyby)));
+  app.tripScreen = measureTrip().total;
 }
 /** Time-flow rate (sim s per screen s) rel s after launch, and the moment it belongs to. */
 function phaseAt(rel) {
   const m = app.mission;
-  if (rel >= m.tArrive) return { rate: orbitRate(), kind: 'orbit' };
+  if (rel >= m.tArrive) return { rate: Math.max(orbitRate() * app.speed, clockFloor(rel)), kind: 'orbit' };
   const lift = Math.max(1, rel / rampK(K_LIFT)), arrive = Math.max(1, (m.tArrive - rel) / rampK(K_ARRIVE));
   let rate = app.factor, kind = 'cruise';
   if (lift < rate) { rate = lift; kind = 'lift'; }
   if (arrive < rate) { rate = arrive; kind = 'arrive'; }
   const fb = flybyPhase(rel, rate);
   if (fb && fb.rate < rate) { rate = fb.rate; kind = 'flyby'; }
-  return { rate: Math.max(rate, floorRate(rel)), kind, fly: kind === 'flyby' ? fb.fly : null };
+  return { rate: Math.max(Math.max(rate, floorRate(rel)) * app.speed, clockFloor(rel)), kind, fly: kind === 'flyby' ? fb.fly : null };
 }
 const rateAt = (rel) => phaseAt(rel).rate;
 // advance by dt of screen time, stopping exactly at flyby edges and the arrival so that even a very
@@ -681,9 +749,9 @@ function announcePhase(st) {
   const prev = app.phaseKey;
   app.phaseKey = key;
   if (!app.playing || app.prelaunch) return;
-  const words = (r) => rateText(r).replace(/^1 s/, '1 second').replace(/^Real time$/, 'real time');
-  const F = words(app.factor), screen = screenTime(app.factor);
-  if (ph.kind === 'lift') facts.announce('Liftoff', `Real time for liftoff, then time speeds up to your setting: ${F}.`);
+  const words = (r) => rateText(roundRate(r)).replace(/^1 s/, '1 second').replace(/^Real time$/, 'real time');
+  const F = words(app.factor * app.speed), screen = screenTime();
+  if (ph.kind === 'lift') facts.announce('Liftoff', `Time starts slow for liftoff, then speeds up to ${F}.`);
   else if (ph.kind === 'cruise' && prev === 'lift') {
     let text = `Time flow: ${F}. At this rate the whole trip takes about ${fmtTime(screen)} on screen.`;
     if (m.tArrive > 2 * YEAR) text += ` In real life it takes ${fmtTime(m.tArrive)}: ${humanScale(m.tArrive)}.`;
@@ -692,7 +760,7 @@ function announcePhase(st) {
   } else if (ph.kind === 'cruise' && prev && prev.tc !== undefined) facts.announce('Time flow', `Back to ${F}.`);
   else if (ph.kind === 'flyby') {
     const v = ph.fly.speed / 1e3;
-    facts.announce(ph.fly.name, `Slowing to ${words(ph.fly.rate)} while ${ph.fly.body} goes by. The ship is doing ${v.toLocaleString('en-US', { maximumFractionDigits: v < 100 ? 1 : 0 })} km/s.`);
+    facts.announce(ph.fly.name, `Slowing to ${words(ph.fly.rate * app.speed)} while ${ph.fly.body} goes by. The ship is doing ${v.toLocaleString('en-US', { maximumFractionDigits: v < 100 ? 1 : 0 })} km/s.`);
   } else if (ph.kind === 'arrive') facts.announce('Final approach', 'Easing time down to watch the arrival.');
   else if (ph.kind === 'orbit' && st.orbiting && isFinite(m.orbit?.P)) facts.announce('In orbit', `Time flow: ${words(ph.rate)}.`);
 }
@@ -709,7 +777,7 @@ function frame(now) {
   if (app.playing) {
     app.t = advance(app.t, dt);
     st = m.stateAt(app.t);
-    app.playClock = (app.playClock || 0) + dt; // screen time that stops while paused (drives passbys)
+    app.playClock = (app.playClock || 0) + dt * app.speed; // trip time at 1× that stops while paused (drives passbys)
   }
   app.warp = rateAt(app.t - m.t0);
   announcePhase(st);
@@ -720,7 +788,8 @@ function frame(now) {
     if (ctl.frame) swingToChase(soon ? 4 : 10);
   }
   if (st.arrived && !app.arrivedShown) {
-    app.arrivedShown = true; showArrival(st); sound.arrive();
+    app.arrivedShown = true; showArrival(st); sound.arrive(app.probe);
+    if (app.probe?.id === 'enterprise' && app.model) app.model.warpBlastTimer = 2.0;
     if (m.dest.id === 'andromeda') facts.announce('Andromeda', 'The faint stars all around are Andromeda\'s own halo, with its star clusters and neighbouring galaxies, shown as a long-exposure camera would record them. To the eye, only Andromeda itself, the Milky Way behind you and, just barely, Triangulum would be visible.');
     if (m.dest.kind === 'blackhole') blackHoleView();
     else if (m.dest.kind === 'galaxy') galaxyView();
@@ -876,7 +945,7 @@ function frame(now) {
       const mag = p.M + 5 * Math.log10(p.b / 10); // apparent magnitude at closest approach
       const as = mag < -3.5 ? 'as bright as Venus in Earth’s sky' : mag < -1.46 ? 'brighter than Sirius, the brightest star seen from Earth' : 'one of the brightest stars in the sky';
       facts.announce('Star pass', `Passing ${p.name} ${(p.b * 3.2616).toFixed(1)} light-years away, a real star from the catalogue. Right now it is ${as}.`);
-      sound.whoosh(0.5, { gain: 0.3, low: 250, high: 1300, len: 2.4 });
+      sound.flyby(0.65);
     },
   });
 
@@ -992,32 +1061,77 @@ function frame(now) {
     if (!app.quatInit) { app.quat.copy(q); app.quatInit = true; }
     app.quat.rotateTowards(q, dt * 0.45); // turns (the flip, entering orbit) at a steady, visible ~26°/s
     probeRoot.quaternion.copy(app.quat);
+    const camDist = v3.len(rel);
+    const baseDist = probeCameraDist(pm.id, 1.0);
+    const distRatio = Math.max(0.1, camDist / baseDist);
+    let zoomFactor;
+    if (distRatio <= 1.0) {
+      zoomFactor = 1.0 + 0.35 * (1.0 - distRatio);
+    } else {
+      const k = Math.log2(distRatio);
+      zoomFactor = Math.pow(0.68, k);
+      if (zoomFactor < 0.02) zoomFactor = 0;
+    }
+
+    app.zoomFactor = zoomFactor;
+
     const bubble = st.field || 0;                               // 0 … 1: how far the bubble's wall is up
     const motion = st.warp > 0 ? st.warp / app.probe.speed : 0; // 0 … 1: the bubble's speed, of its top speed
-    pm.update(app.playing ? st.accel : 0, wall, app.warp, bubble);
-    sound.warpHum(menu.visible || !app.playing ? 0 : bubble);
-    if (bubble > 0.02 && !app.bubbleHeard && app.playing) { app.bubbleHeard = true; sound.warpUp(); }
+    pm.update(app.playing ? st.accel : 0, wall, app.warp, bubble, dt, motion);
+    sound.warpHum(menu.visible || !app.playing || !probeRoot.visible ? 0 : bubble * zoomFactor);
+    if (bubble > 0.02 && !app.bubbleHeard && app.playing) {
+      app.bubbleHeard = true;
+      if (!app.warpBlastAt || (wall - app.warpBlastAt > 2.5)) sound.warpUp();
+    }
     // a burst of gravitational waves as the wall goes up or down, at its fastest change (half-way)
     if (app.playing && (app.lastField ?? 0) < 0.5 !== bubble < 0.5 && Math.abs(bubble - (app.lastField ?? 0)) < 0.2) app.gwAt = wall;
     app.lastField = bubble;
+
+    // Warp blast shockwave vs normal gravitational waves
+    const blastAge = app.warpBlastAt === undefined ? Infinity : wall - app.warpBlastAt;
+    const blastGw = blastAge < 1.2 ? 0.038 * Math.exp(-blastAge / 0.35) * Math.sin(blastAge * 2 * Math.PI * 6.5) : 0;
     const gwAge = app.gwAt === undefined ? Infinity : wall - app.gwAt;
-    const gw = gwAge < 0.8 ? 0.006 * Math.exp(-gwAge / 0.15) * Math.sin(gwAge * 2 * Math.PI * 9) : 0;
-    // the warp bubble as a lens around the ship, seen from outside (zoom inside it for the crew's view)
-    const lensOn = bubble > 0.001 && v3.len(relW(st.pos)) > WARP_R * pm.length;
-    warpPass.enabled = lensOn || gw !== 0;
-    if (warpPass.enabled) {
-      const u = warpPass.uniforms;
+    const normalGw = gwAge < 0.8 ? 0.015 * Math.exp(-gwAge / 0.2) * Math.sin(gwAge * 2 * Math.PI * 8) : 0;
+    const gw = Math.abs(blastGw) > Math.abs(normalGw) ? blastGw : normalGw;
+
+    // Cinematic camera shudder on warp blast
+    if (blastAge < 0.6 && ctl.focus === 'probe') {
+      const shk = Math.exp(-blastAge / 0.25) * 0.0035;
+      ctl.yaw += Math.sin(wall * 48) * shk;
+      ctl.pitch += Math.cos(wall * 36) * shk;
+    }
+
+    // the warp bubble as a lens around the ship, seen from outside (zoom inside it for the crew's view);
+    // a sci-fi ship with its own warp field (the Enterprise) gets a lens of that shape with a long wake
+    const wf = pm.warpField;
+    const lensOn = bubble > 0.001 && (wf || v3.len(relW(st.pos)) > WARP_R * pm.length);
+    const wp = wf ? warpTrekPass : warpPass;
+    (wf ? warpPass : warpTrekPass).enabled = false;
+    wp.enabled = lensOn || gw !== 0;
+    if (wp.enabled) {
+      const u = wp.uniforms;
       u.uActive.value = lensOn ? 1 : 0;
       u.uGW.value = gw;
       u.uCenter.value.copy(probeRoot.position).applyMatrix4(camera.matrixWorldInverse);
       u.uAxis.value.set(...m.dir).transformDirection(camera.matrixWorldInverse);
-      u.uR.value = WARP_R * pm.length;
-      u.uA.value = 0.05 * bubble;                                            // the wall's bending at its edge (rad)
-      u.uK.value = (0.15 + 0.03 * Math.log10(app.probe.speed)) * motion;     // the motion's, in the wall (rad)
+      if (wf) {
+        u.uR.value = wf.R;
+        u.uFwd.value = wf.front / wf.R;
+        u.uAft.value = -wf.wake * (0.08 + 0.92 * motion);
+        u.uWake.value = bubble * (0.2 + 0.8 * motion);
+        u.uA.value = 0.15 * bubble;
+        u.uK.value = (0.32 + 0.06 * Math.log10(app.probe.speed)) * motion;
+      } else {
+        u.uR.value = WARP_R * pm.length;
+        u.uA.value = 0.05 * bubble;                                          // the wall's bending at its edge (rad)
+        u.uK.value = (0.15 + 0.03 * Math.log10(app.probe.speed)) * motion;   // the motion's, in the wall (rad)
+      }
       u.uTime.value = wall;
       u.uInvProj.value.copy(camera.projectionMatrixInverse); u.uProj.value.copy(camera.projectionMatrix);
     }
-    sound.engine(app.playing && st.accel > 0 && probeRoot.visible && !menu.visible ? 1 : 0);
+    const probe = app.probe;
+    const hasRocketEngine = probe && probe.kind === 'thrust' && !['voyager', 'parker', 'warp', 'orion'].includes(probe.id);
+    sound.engine(hasRocketEngine && app.playing && st.accel > 0 && probeRoot.visible && !menu.visible ? zoomFactor : 0);
     // light from the nearest star (or the destination galaxy in deep space)
     const near = [[sunW, 5772, dSun, 4.83], [PROXIMA.pos, 3042, dProx, 15.5], [compW, 5850, dComp, 5.0]]
       .map(([p, T, d, M]) => ({ p, T, d, I: Math.pow(10, -0.4 * (M + 5 * Math.log10(d / PC) - 5)) }))
@@ -1081,7 +1195,7 @@ function frame(now) {
   facts.update(dt, app.playing && !menu.visible, app.t - m.t0);
 
   if (menu.visible) {
-    warpPass.enabled = false;
+    warpPass.enabled = warpTrekPass.enabled = false;
     // the menu has its own little stage; everything else keeps updating underneath
     setObserverVelocity([1, 0, 0], 0);
     menu.update(dt, wall);
@@ -1178,9 +1292,9 @@ function updateHUD(st) {
   $('h-time-sub').textContent = lag > te * 0.01 && te > 3600 ? `aboard the ship: only ${fmtTime(st.tau)}`
     : st.arrived ? 'arrived' : app.prelaunch ? `trip: ${fmtTime(m.tArrive)}` : `${fmtTime(m.tArrive - te)} to go`;
   const ph = phaseAt(app.t - m.t0);
-  $('tf-rate').textContent = app.playing ? rateText(app.warp) : 'Paused';
-  $('tf-gear').textContent = { lift: 'Liftoff · speeding up', cruise: 'Your setting', flyby: ph.fly?.name, arrive: 'Final approach', orbit: st.orbiting && isFinite(m.orbit?.P) ? 'In orbit' : 'Arrived' }[ph.kind];
-  $('tf-set').textContent = `Setting: ${rateText(app.factor)} · trip ≈ ${fmtTime(screenTime(app.factor))} on screen`;
+  $('tf-rate').textContent = app.playing ? `Speed ${speedText(app.speed)}` : 'Paused';
+  $('tf-gear').textContent = { lift: 'Liftoff', cruise: 'Cruising', flyby: ph.fly?.name, arrive: 'Final approach', orbit: st.orbiting && isFinite(m.orbit?.P) ? 'In orbit' : 'Arrived' }[ph.kind];
+  $('tf-set').textContent = `Now ${rateText(roundRate(app.warp))} · trip ≈ ${fmtTime(screenTime())} on screen`;
 }
 
 function showArrival(st) {

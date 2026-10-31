@@ -38,6 +38,7 @@
       </div>
       <div class="m-trip">
         <div><label>Trip time</label><b id="m-trip">—</b></div>
+        <div id="m-wait-box"><label>Launch window in</label><b id="m-wait">—</b></div>
         <div id="m-aboard-box"><label>Felt aboard</label><b id="m-aboard">—</b></div>
         <div><label>Light takes</label><b id="m-light">—</b></div>
         <div><label>Top speed</label><b id="m-top">—</b></div>
@@ -84,7 +85,7 @@
         <div class="seg" id="seg-focus"><button data-v="probe" class="on">Ship</button><button data-v="dest">Destination</button><button data-v="earth">Earth</button></div></div>
       <div class="pop-row"><label>Show</label>
         <div class="pop-togs">
-          <button id="b-orbits" class="tog on" title="Planet orbits &amp; flight path (O)">Paths</button>
+          <button id="b-orbits" class="tog" title="Planet orbits &amp; flight path (O)">Paths</button>
           <button id="b-moons" class="tog on" title="Moons of the planets (M)">Moons</button>
           <button id="b-labels" class="tog on" title="Labels (L)">Labels</button>
           <button id="b-disk" class="tog on hidden" title="Show an accretion disk">Disk</button>
@@ -109,7 +110,7 @@
       <label>Time flow</label>
       <div class="tf-rate" id="tf-rate">Real time</div>
       <div class="tf-gear" id="tf-gear">—</div>
-      <div class="tf-ctl"><button id="tf-slow" title="Slow time down">‹</button><button id="tf-reset" class="on" title="Back to the default for this destination">Reset</button><button id="tf-fast" title="Speed time up">›</button></div>
+      <div class="tf-ctl"><button id="tf-slow" title="Slow the whole trip down">‹</button><button id="tf-reset" class="on" title="Back to 1×">Reset</button><button id="tf-fast" title="Speed the whole trip up">›</button></div>
       <div class="tf-set" id="tf-set"></div>
     </div>
   </footer>

@@ -30,6 +30,40 @@ export class Sound {
       this.tracks = [...local, ...pub];
       if (!this.tracks.some((x) => x.file === this.track)) this.track = this.tracks[0]?.file ?? null;
     });
+    this.ignitionBuffer = null;
+    this.ignitionLoad = fetch('audio/ignition.mp3')
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+    this.flybyBuffers = [];
+    this.flybyLoads = Promise.all([
+      fetch('audio/flyby1.mp3').then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null),
+      fetch('audio/flyby2.mp3').then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null),
+    ]);
+    this.lastFlybyIdx = -1;
+    this.engineBuffer = null;
+    this.engineSource = null;
+    this.rockTimers = new Set();
+    this.activeNodes = new Set();
+    this.engineLoad = fetch('audio/engine.wav')
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+    this.warpTravelBuffer = null;
+    this.warpTravelSource = null;
+    this.warpTravelLoad = fetch('audio/warp_travel.wav')
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+    this.pulseBuffer = null;
+    this.pulseLoad = fetch('audio/orion_pulse.wav')
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+    this.warpIgnitionBuffer = null;
+    this.warpIgnitionLoad = fetch('audio/warp_ignition.mp3')
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+    this.warpArrivalBuffer = null;
+    this.warpArrivalLoad = fetch('audio/warp_arrival.mp3')
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
     const unlock = () => { this.start(); removeEventListener('pointerdown', unlock); removeEventListener('keydown', unlock); };
     addEventListener('pointerdown', unlock);
     addEventListener('keydown', unlock);
@@ -52,24 +86,73 @@ export class Sound {
     this.music.gain.value = 0;
     ctx.createMediaElementSource(this.audio).connect(this.music);
     this.music.connect(this.out);
+    if (this.ignitionLoad) {
+      this.ignitionLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => { this.ignitionBuffer = decoded; }, () => {});
+        }
+      });
+    }
+    if (this.pulseLoad) {
+      this.pulseLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => { this.pulseBuffer = decoded; }, () => {});
+        }
+      });
+    }
+    if (this.warpIgnitionLoad) {
+      this.warpIgnitionLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => { this.warpIgnitionBuffer = decoded; }, () => {});
+        }
+      });
+    }
+    if (this.warpArrivalLoad) {
+      this.warpArrivalLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => { this.warpArrivalBuffer = decoded; }, () => {});
+        }
+      });
+    }
+    if (this.flybyLoads) {
+      this.flybyLoads.then(([b1, b2]) => {
+        if (!this.ctx) return;
+        if (b1) this.ctx.decodeAudioData(b1.slice(0), (decoded) => { this.flybyBuffers[0] = decoded; }, () => {});
+        if (b2) this.ctx.decodeAudioData(b2.slice(0), (decoded) => { this.flybyBuffers[1] = decoded; }, () => {});
+      });
+    }
     // two seconds of white noise, the raw material of every rumble and whoosh
     const n = ctx.sampleRate * 2;
     this.noise = ctx.createBuffer(1, n, ctx.sampleRate);
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
-    // the engine drone runs all the time; engine(level) only turns its volume up and down
+    // the engine loop: plays the recorded engine sound, engine(level) scales its volume
     this.drone = ctx.createGain();
     this.drone.gain.value = 0;
-    const src = this.noiseSource(true), lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = 110; lp.Q.value = 0.7;
-    const hum = ctx.createOscillator();
-    hum.frequency.value = 41;
-    const humGain = ctx.createGain();
-    humGain.gain.value = 0.25;
-    src.connect(lp).connect(this.drone);
-    hum.connect(humGain).connect(this.drone);
     this.drone.connect(this.bus.engine);
-    src.start(); hum.start();
+    if (this.engineLoad) {
+      this.engineLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => {
+            this.engineBuffer = decoded;
+            if (this.inJourney) this.startEngineLoop();
+          }, () => {});
+        }
+      });
+    }
+    // the warp engine travel loop: plays the recorded warp engine travel sound, warpHum(level) scales its volume
+    this.warpGain = ctx.createGain();
+    this.warpGain.gain.value = 0;
+    this.warpGain.connect(this.bus.warp);
+    if (this.warpTravelLoad) {
+      this.warpTravelLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => {
+            this.warpTravelBuffer = decoded;
+          }, () => {});
+        }
+      });
+    }
     // the warp hum: a low fifth, slowly beating, under an airy high shimmer; warpHum(level) sets its volume
     this.hum = ctx.createGain();
     this.hum.gain.value = 0;
@@ -97,6 +180,115 @@ export class Sound {
     return s;
   }
 
+  _trackNode(node) {
+    if (!node) return;
+    this.activeNodes.add(node);
+    const prevEnded = node.onended;
+    node.onended = (e) => {
+      this.activeNodes.delete(node);
+      if (prevEnded) prevEnded.call(node, e);
+    };
+  }
+
+  _playSource(buf, targetBus, gain = 1.0) {
+    if (!this.ctx || !buf) return null;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const g = this.ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g).connect(targetBus);
+    this._trackNode(src);
+    src.start();
+    return src;
+  }
+
+  startEngineLoop() {
+    if (!this.ctx || !this.engineBuffer) return;
+    this.stopEngineLoop();
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.engineBuffer;
+    src.loop = true;
+    src.loopStart = 0;
+    src.loopEnd = this.engineBuffer.duration;
+    src.connect(this.drone);
+    src.start(0);
+    this.engineSource = src;
+  }
+
+  stopEngineLoop() {
+    if (this.engineSource) {
+      try { this.engineSource.stop(); } catch (e) {}
+      this.engineSource = null;
+    }
+  }
+
+  startWarpTravelLoop() {
+    if (!this.ctx || !this.warpTravelBuffer) return;
+    this.stopWarpTravelLoop();
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.warpTravelBuffer;
+    src.loop = true;
+    src.loopStart = 0;
+    src.loopEnd = this.warpTravelBuffer.duration;
+    src.connect(this.warpGain);
+    src.start(0);
+    this.warpTravelSource = src;
+  }
+
+  stopWarpTravelLoop() {
+    if (this.warpTravelSource) {
+      try { this.warpTravelSource.stop(); } catch (e) {}
+      this.warpTravelSource = null;
+    }
+  }
+
+  stopAll() {
+    // Cancel all queued rock field whooshes
+    for (const tid of this.rockTimers) clearTimeout(tid);
+    this.rockTimers.clear();
+
+    // Terminate any active transient sound effects
+    for (const node of this.activeNodes) {
+      try { node.stop(); } catch (e) {}
+    }
+    this.activeNodes.clear();
+
+    // Kill engine sound loop
+    this.stopEngineLoop();
+    // Kill warp travel loop
+    this.stopWarpTravelLoop();
+
+    // Mute Web Audio gains immediately
+    if (this.ctx) {
+      const t = this.ctx.currentTime;
+      if (this.music) {
+        this.music.gain.cancelScheduledValues(t);
+        this.music.gain.setValueAtTime(0, t);
+      }
+      if (this.drone) {
+        this.drone.gain.cancelScheduledValues(t);
+        this.drone.gain.setValueAtTime(0, t);
+      }
+      if (this.warpGain) {
+        this.warpGain.gain.cancelScheduledValues(t);
+        this.warpGain.gain.setValueAtTime(0, t);
+      }
+      if (this.hum) {
+        this.hum.gain.cancelScheduledValues(t);
+        this.hum.gain.setValueAtTime(0, t);
+      }
+    }
+
+    // Stop and rewind background music track to 0:00
+    if (this.audio) {
+      try {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+      } catch (e) {}
+    }
+    this.inJourney = false;
+  }
+
   // ---------------------------------------------------------------- settings
   setSfx(on) {
     this.sfxOn = on; store.set('sfx', on);
@@ -105,9 +297,14 @@ export class Sound {
   setMusic(on) { this.musicOn = on; store.set('music', on); this.start(); this.updateMusic(); }
   setTrack(file) { this.track = file; store.set('track', file); this.start(); this.updateMusic(true); }
   setVolume(v) { this.volume = v; store.set('volume', v); this.updateMusic(); }
-  setInJourney(inJourney) {
+  setInJourney(inJourney, restart = false) {
+    const wasInJourney = this.inJourney;
     this.inJourney = !!inJourney;
-    this.updateMusic();
+    if (!this.inJourney) {
+      this.stopAll();
+    } else {
+      this.updateMusic(restart || !wasInJourney);
+    }
   }
   setLevel(id, v) {
     this.levels[id] = v; store.set('levels', this.levels);
@@ -120,14 +317,20 @@ export class Sound {
     const t = this.ctx.currentTime;
     if (want) {
       const url = 'music/' + this.track;
-      if (restart || !this.audio.src.endsWith(encodeURI(url))) { this.audio.src = url; this.audio.currentTime = 0; }
+      if (restart || !this.audio.src.endsWith(encodeURI(url))) {
+        this.audio.src = url;
+        this.audio.currentTime = 0;
+      }
       this.audio.play().catch(() => {});
       this.music.gain.cancelScheduledValues(t);
       this.music.gain.setTargetAtTime(this.volume * 0.8, t, 0.6); // fade in
     } else {
       this.music.gain.cancelScheduledValues(t);
-      this.music.gain.setTargetAtTime(0, t, 0.4);
-      setTimeout(() => { if (!this.inJourney || !this.musicOn || !this.track) this.audio.pause(); }, 1500);
+      this.music.gain.setValueAtTime(0, t);
+      try {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+      } catch (e) {}
     }
   }
 
@@ -137,13 +340,48 @@ export class Sound {
   /** Engines: 0 = silent … 1 = full burn. Called every frame; changes glide. */
   engine(level) {
     if (!this.ctx) return;
-    this.drone.gain.setTargetAtTime(0.16 * level, this.ctx.currentTime, 0.4);
+    if (level > 0 && !this.engineSource && this.engineBuffer) {
+      this.startEngineLoop();
+    }
+    this.drone.gain.setTargetAtTime(0.55 * level, this.ctx.currentTime, 0.06);
   }
 
-  /** Warp bubble: 0 … 1 as it spools up and down. Called every frame; changes glide. */
+  /** Warp engine travel sound: level 0 … 1 based on bubble & camera distance. */
   warpHum(level) {
     if (!this.ctx) return;
-    this.hum.gain.setTargetAtTime(0.12 * level, this.ctx.currentTime, 0.5);
+    if (level > 0.005 && !this.warpTravelSource && this.warpTravelBuffer) {
+      this.startWarpTravelLoop();
+    }
+    if (this.warpGain) {
+      this.warpGain.gain.setTargetAtTime(0.72 * level, this.ctx.currentTime, 0.06);
+    }
+    if (this.hum) {
+      this.hum.gain.setTargetAtTime(0.04 * level, this.ctx.currentTime, 0.06);
+    }
+  }
+
+  /** Warp ignition: plays the recorded Enterprise warp ignition sound through the warp bus. */
+  warpIgnition(gain = 1.0) {
+    if (!this.live) return;
+    const play = (buffer) => {
+      this._playSource(buffer, this.bus.warp, gain);
+    };
+    if (this.warpIgnitionBuffer) {
+      play(this.warpIgnitionBuffer);
+    } else if (this.warpIgnitionLoad) {
+      this.warpIgnitionLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => {
+            this.warpIgnitionBuffer = decoded;
+            play(decoded);
+          }, () => {});
+        }
+      });
+    }
+  }
+
+  warpBlast() {
+    this.warpIgnition();
   }
 
   /** The bubble forming: a deep sweep up into a bright swell. */
@@ -160,6 +398,7 @@ export class Sound {
     g.gain.exponentialRampToValueAtTime(0.25, t + 1.8);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 3.4);
     o.connect(f).connect(g).connect(this.bus.warp);
+    this._trackNode(o);
     o.start(t); o.stop(t + 3.5);
   }
 
@@ -173,76 +412,145 @@ export class Sound {
     g.gain.linearRampToValueAtTime(0.18, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + (last ? 0.5 : 0.18));
     o.connect(g).connect(this.bus.countdown);
+    this._trackNode(o);
     o.start(t); o.stop(t + 0.6);
   }
 
-  /** Booster ignition: a deep thump, a roar that opens up, crackle on top, then a long fade. */
-  ignition() {
+  /** Booster ignition: plays the recorded booster ignition sound through the ignition bus. */
+  ignition(probe) {
+    const id = typeof probe === 'object' ? probe?.id : probe;
+    const kind = typeof probe === 'object' ? probe?.kind : probe;
+    if (['voyager', 'parker', 'warp', 'orion'].includes(id) || ['ballistic', 'cruise', 'warp'].includes(kind)) return;
     if (!this.live) return;
-    const c = this.ctx, t = c.currentTime, dur = 6;
-    // roar: low-passed noise whose cutoff jumps open and settles
-    const roar = this.noiseSource(true), lp = c.createBiquadFilter(), rg = c.createGain();
-    lp.type = 'lowpass'; lp.Q.value = 0.9;
-    lp.frequency.setValueAtTime(80, t);
-    lp.frequency.exponentialRampToValueAtTime(900, t + 0.35);
-    lp.frequency.exponentialRampToValueAtTime(260, t + 2.5);
-    rg.gain.setValueAtTime(0, t);
-    rg.gain.linearRampToValueAtTime(0.9, t + 0.12);
-    rg.gain.setTargetAtTime(0.45, t + 0.6, 0.8);
-    rg.gain.setTargetAtTime(0, t + 2.8, 1.1);
-    roar.connect(lp).connect(rg).connect(this.bus.ignition);
-    roar.start(t); roar.stop(t + dur);
-    // thump: a falling sine
-    const o = c.createOscillator(), og = c.createGain();
-    o.frequency.setValueAtTime(90, t);
-    o.frequency.exponentialRampToValueAtTime(32, t + 0.8);
-    og.gain.setValueAtTime(0.9, t);
-    og.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
-    o.connect(og).connect(this.bus.ignition);
-    o.start(t); o.stop(t + 1.7);
-    // crackle: high-passed noise chopped by a fast random-ish tremolo
-    const cr = this.noiseSource(true), hp = c.createBiquadFilter(), cg = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
-    hp.type = 'highpass'; hp.frequency.value = 2400;
-    cg.gain.setValueAtTime(0, t);
-    cg.gain.linearRampToValueAtTime(0.12, t + 0.2);
-    cg.gain.setTargetAtTime(0, t + 1.6, 0.7);
-    lfo.type = 'square'; lfo.frequency.value = 23;
-    lg.gain.value = 0.08;
-    lfo.connect(lg).connect(cg.gain);
-    cr.connect(hp).connect(cg).connect(this.bus.ignition);
-    cr.start(t); lfo.start(t); cr.stop(t + dur); lfo.stop(t + dur);
-  }
-
-  /** A body sweeping past: a filtered whoosh that pans across and peaks after `lead` seconds. */
-  whoosh(lead = 1, { gain = 0.55, low = 220, high = 1700, len = 2.6, bus = 'flyby' } = {}) {
-    if (!this.live) return;
-    const c = this.ctx, t = c.currentTime, peak = t + lead, end = peak + len * 0.6;
-    const src = this.noiseSource(true), bp = c.createBiquadFilter(), g = c.createGain(), pan = c.createStereoPanner();
-    bp.type = 'bandpass'; bp.Q.value = 1.1;
-    bp.frequency.setValueAtTime(low, t);
-    bp.frequency.exponentialRampToValueAtTime(high, peak);
-    bp.frequency.exponentialRampToValueAtTime(low * 0.8, end);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(gain, peak);
-    g.gain.exponentialRampToValueAtTime(0.0001, end);
-    const side = Math.random() < 0.5 ? -1 : 1;
-    pan.pan.setValueAtTime(-0.8 * side, t);
-    pan.pan.linearRampToValueAtTime(0.8 * side, end);
-    src.connect(bp).connect(g).connect(pan).connect(this.bus[bus]);
-    src.start(t); src.stop(end + 0.1);
-  }
-
-  /** A field of rocks streaming past: a scatter of small whooshes over `dur` seconds. */
-  rocks(dur = 8) {
-    if (!this.live) return;
-    for (let i = 0; i < 14; i++) {
-      const at = Math.random() * dur * 0.8;
-      setTimeout(() => this.whoosh(0.25, { gain: 0.12 + Math.random() * 0.12, low: 400, high: 2600 + Math.random() * 1500, len: 0.8, bus: 'rocks' }), at * 1000);
+    if (this.ignitionBuffer) {
+      this._playSource(this.ignitionBuffer, this.bus.ignition);
+    } else if (this.ignitionLoad) {
+      this.ignitionLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => {
+            this.ignitionBuffer = decoded;
+            this._playSource(decoded, this.bus.ignition);
+          }, () => {});
+        }
+      });
     }
   }
 
-  /** Arrival: a soft bell chord. */
-  arrive() {
+  /** Project Orion nuclear pulse detonation: blasts an explosion timed to the orb */
+  nuclearPulse(gain = 1.0) {
+    if (!this.live) return;
+    const play = (buffer) => {
+      this._playSource(buffer, this.bus.ignition, gain * 0.95);
+    };
+    if (this.pulseBuffer) {
+      play(this.pulseBuffer);
+    } else if (this.pulseLoad) {
+      this.pulseLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => {
+            this.pulseBuffer = decoded;
+            play(decoded);
+          }, () => {});
+        }
+      });
+    }
+  }
+
+  /** A celestial body, star, or rock field sweeping past: plays the recorded flyby sounds. */
+  flyby(gain = 1.0, bus = 'flyby') {
+    if (!this.live) return;
+    const bufs = this.flybyBuffers.filter(Boolean);
+    const targetBus = this.bus[bus] || this.bus.flyby;
+    if (bufs.length) {
+      this.lastFlybyIdx = (this.lastFlybyIdx + 1) % bufs.length;
+      this._playSource(bufs[this.lastFlybyIdx], targetBus, gain);
+    } else if (this.flybyLoads) {
+      this.flybyLoads.then(([b1, b2]) => {
+        if (!this.ctx) return;
+        const pick = Math.random() < 0.5 ? (b1 || b2) : (b2 || b1);
+        if (pick) {
+          this.ctx.decodeAudioData(pick.slice(0), (d) => {
+            this._playSource(d, targetBus, gain);
+          }, () => {});
+        }
+      });
+    }
+  }
+
+  /** A body or rock sweeping past: plays the recorded flyby sound. */
+  whoosh(lead = 1, { gain = 0.55, bus = 'flyby' } = {}) {
+    this.flyby(gain, bus);
+  }
+
+  /** A field of rocks streaming past: plays the recorded flyby sounds as rocks zap past. */
+  rocks(dur = 8) {
+    if (!this.live) return;
+    const passes = Math.max(2, Math.min(4, Math.floor(dur / 2.4)));
+    for (let i = 0; i < passes; i++) {
+      const at = i * (dur / passes) + 0.15;
+      const tid = setTimeout(() => {
+        this.rockTimers.delete(tid);
+        this.flyby(0.65, 'rocks');
+      }, at * 1000);
+      this.rockTimers.add(tid);
+    }
+  }
+
+  /** A rock hitting the forward deflector shield: crisp kinetic impact clang + energy hiss. */
+  shieldHit(intensity = 1.0) {
+    if (!this.live) return;
+    const c = this.ctx, t = c.currentTime;
+    // 1. Sharp metallic / plasma strike (frequency dropping rapidly)
+    const osc = c.createOscillator(), gOsc = c.createGain();
+    osc.type = 'triangle';
+    const startF = 850 + Math.random() * 600;
+    osc.frequency.setValueAtTime(startF, t);
+    osc.frequency.exponentialRampToValueAtTime(120, t + 0.11);
+    gOsc.gain.setValueAtTime(0.32 * intensity, t);
+    gOsc.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    osc.connect(gOsc).connect(this.bus.rocks);
+    this._trackNode(osc);
+    osc.start(t); osc.stop(t + 0.15);
+
+    // 2. High-energy burst of sparks / shield sizzle
+    const src = this.noiseSource(true), bp = c.createBiquadFilter(), gNoise = c.createGain();
+    bp.type = 'bandpass'; bp.Q.value = 2.8;
+    bp.frequency.setValueAtTime(2600 + Math.random() * 900, t);
+    bp.frequency.exponentialRampToValueAtTime(700, t + 0.1);
+    gNoise.gain.setValueAtTime(0.24 * intensity, t);
+    gNoise.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    src.connect(bp).connect(gNoise).connect(this.bus.rocks);
+    this._trackNode(src);
+    src.start(t); src.stop(t + 0.13);
+  }
+
+  /** Enterprise warp arrival: plays the recorded Star Trek warp drop-out arrival sound. */
+  warpArrival(gain = 1.0) {
+    if (!this.live) return;
+    const play = (buffer) => {
+      this._playSource(buffer, this.bus.arrival, gain);
+    };
+    if (this.warpArrivalBuffer) {
+      play(this.warpArrivalBuffer);
+    } else if (this.warpArrivalLoad) {
+      this.warpArrivalLoad.then((buf) => {
+        if (buf && this.ctx) {
+          this.ctx.decodeAudioData(buf.slice(0), (decoded) => {
+            this.warpArrivalBuffer = decoded;
+            play(decoded);
+          }, () => {});
+        }
+      });
+    }
+  }
+
+  /** Arrival: a soft bell chord, or warp drop-out arrival for the Enterprise. */
+  arrive(probe) {
+    const id = typeof probe === 'object' ? probe?.id : probe;
+    if (id === 'enterprise') {
+      this.warpArrival();
+      return;
+    }
     if (!this.live) return;
     const c = this.ctx, t = c.currentTime;
     [523.25, 783.99, 1046.5, 1318.5].forEach((f, i) => {
@@ -252,6 +560,7 @@ export class Sound {
       g.gain.linearRampToValueAtTime(0.09, at + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, at + 3.5);
       o.connect(g).connect(this.bus.arrival);
+      this._trackNode(o);
       o.start(at); o.stop(at + 3.6);
     });
   }

@@ -346,6 +346,163 @@ const WarpShader = {
     }`,
 };
 
+// The Enterprise's warp field: Star Trek, not Alcubierre. A lens the shape of its nested field shells
+// (createWarpDrive in probes3d.js) that runs on behind the ship as a long tapering wake, where the background is
+// churned, smeared along the line of flight so stars draw out into streaks, and threaded with blue light.
+const TrekWarpShader = {
+  uniforms: {
+    tDiffuse: { value: null }, uActive: { value: 0 }, uCenter: { value: new THREE.Vector3() }, uAxis: { value: new THREE.Vector3(0, 0, -1) },
+    uR: { value: 1 }, uFwd: { value: 0.6 }, uAft: { value: -2.6 }, uWake: { value: 0 }, uK: { value: 0 }, uA: { value: 0 }, uGW: { value: 0 }, uTime: { value: 0 }, uInvProj: { value: new THREE.Matrix4() }, uProj: { value: new THREE.Matrix4() },
+  },
+  vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uActive, uR, uFwd, uAft, uWake, uK, uA, uTime, uGW;
+    uniform vec3 uCenter, uAxis;   // view space
+    uniform mat4 uInvProj, uProj;
+    varying vec2 vUv;
+    float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float noise2(vec2 p) {
+      vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash2(i), hash2(i + vec2(1, 0)), f.x), mix(hash2(i + vec2(0, 1)), hash2(i + vec2(1, 1)), f.x), f.y);
+    }
+    // Radius of the zone at s along its spine. With a wake it tapers smoothly over the whole long tail.
+    float rimAt(float s, float sFwd, float sAft) {
+      if (s > 0.0) { float u = clamp(s / max(sFwd, 1e-4), 0.0, 1.0); return uR * sqrt(max(0.01, 1.0 - u * u)); }
+      float u = clamp(-s / max(-sAft, 1e-4), 0.0, 1.0);
+      return uR * pow(max(1.0 - u, 0.0), 1.4) + 0.01 * uR;
+    }
+    void main() {
+      // the gravitational-wave burst: stretch one way across the picture, squeeze the other
+      vec2 q = vUv - 0.5;
+      vec2 uv0 = 0.5 + q * (1.0 + uGW * vec2(1.0, -1.0));
+      vec4 base = texture2D(tDiffuse, uv0);
+      if (uActive < 0.5) { gl_FragColor = base; return; }
+      vec4 vv = uInvProj * vec4(vUv * 2.0 - 1.0, -1.0, 1.0);
+      vec3 d = normalize(vv.xyz / vv.w);
+      vec3 b = uCenter;
+      vec3 a = normalize(uAxis);
+
+      // Trailing bubble zone: elongated aerodynamic teardrop/capsule along flight axis
+      float sFwd = uFwd * uR;
+      float sAft = uAft * uR; // trails backward behind the ship
+
+      // Closest approach between ray (t*d) and bubble spine (b + s*a)
+      float D = dot(d, a);
+      float bd = dot(b, d), ba = dot(b, a);
+      float denom = 1.0 - D * D;
+      float t0, s0;
+      if (denom < 1e-5) {
+        t0 = max(0.0, bd);
+        s0 = t0 * D - ba;
+      } else {
+        t0 = (bd - D * ba) / denom;
+        s0 = (D * bd - ba) / denom;
+      }
+      t0 = max(0.0, t0);
+      float sClamped = clamp(s0, sAft, sFwd);
+
+      vec3 pRay = t0 * d;
+      vec3 pSpine = b + a * sClamped;
+      vec3 delta = pRay - pSpine;
+      float dist = length(delta);
+
+      // Boundary radius of the trailing teardrop zone along the axis
+      float rBound = rimAt(sClamped, sFwd, sAft);
+
+      float x = dist / max(rBound, 1e-4);
+
+      // Check if camera (origin) is inside the trailing bubble zone
+      float sCam = -dot(b, a);
+      float rCam = length(-b - a * sCam);
+      float rCamBound = rimAt(clamp(sCam, sAft, sFwd), sFwd, sAft);
+      bool inside = sCam >= sAft && sCam <= sFwd && rCam < rCamBound;
+
+      vec3 dd = d;
+
+      // 1. Spacetime wall metric deflection: bending away from the trailing spine
+      float sNorm = sClamped / max(uR, 1e-4);
+      float along = clamp(sClamped / min(sAft, -1e-4), 0.0, 1.0);
+      sNorm = max(sNorm, -1.5);
+      if (!inside && t0 > 0.0) {
+        float aBend = uA * exp(-pow((x - 1.0) / 0.22, 2.0));
+        aBend *= (1.0 - along) * (1.0 - along);
+        vec3 norm = dist > 1e-5 ? delta / dist : normalize(d - a * D);
+        dd = normalize(d + aBend * norm);
+      }
+
+      // 2. Motion contraction ahead & expansion behind along the trailing zone
+      float w = inside ? 0.12 : exp(-pow((x - 1.0) / 0.25, 2.0));
+      float sMetric = uK * w * 0.45 * sNorm;
+      sMetric *= (1.0 - along) * (1.0 - along) * (1.0 - along);
+      vec3 perp = dd - a * dot(dd, a);
+      float pl = length(perp);
+      if (pl > 1e-5) dd = normalize(dd + sMetric * perp / pl);
+
+      // 3. The wake: the background behind the ship is churned as it streams away
+      float wake = 0.0, across = 0.0, sR = s0 / max(uR, 1e-4);
+      if (!inside && t0 > 0.0 && s0 < 0.0) {
+        vec3 side = cross(a, d);
+        side /= max(length(side), 1e-4);
+        across = dot(delta, side) / max(rBound, 1e-4);
+        wake = uWake * (1.0 - smoothstep(0.2, 1.05, x)) * smoothstep(0.0, 0.6, -sR) * pow(max(1.0 - along, 0.0), 1.1);
+        float churn = noise2(vec2(across * 2.5, sR * 0.8 + uTime * 1.5)) - 0.5;
+        dd = normalize(dd + side * wake * 0.07 * churn + a * wake * 0.03 * sin(sR * 2.6 + uTime * 4.0));
+      }
+
+      if (dd == d) { gl_FragColor = base; return; }
+
+      vec4 c = uProj * vec4(dd, 1.0);
+      vec2 uv = 0.5 + (c.xy / c.w * 0.5) * (1.0 + uGW * vec2(1.0, -1.0));
+      vec2 e = min(uv, 1.0 - uv);
+      float onScreen = c.w > 0.0 ? smoothstep(0.0, 0.03, min(e.x, e.y)) : 0.0;
+
+      // Gentle, subtle chromatic dispersion
+      float bendMag = length(dd - d);
+      vec2 dispDir = (bendMag > 1e-5 ? normalize(uv - 0.5) : vec2(0.0)) * bendMag * 0.0035;
+      vec3 col;
+      if (onScreen > 0.0) {
+        float cr = texture2D(tDiffuse, clamp(uv + dispDir, 0.001, 0.999)).r;
+        float cg = texture2D(tDiffuse, clamp(uv, 0.001, 0.999)).g;
+        float cb = texture2D(tDiffuse, clamp(uv - dispDir, 0.001, 0.999)).b;
+        col = mix(base.rgb, vec3(cr, cg, cb), onScreen);
+      } else {
+        col = base.rgb;
+      }
+
+      // Stars in the wake smear into streaks along the line of flight, bluer toward their tails
+      if (wake > 0.002) {
+        vec4 ca = uProj * vec4(pSpine, 1.0), cb = uProj * vec4(pSpine - a * uR, 1.0);
+        if (ca.w > 0.0 && cb.w > 0.0) {
+          vec2 sd = cb.xy / cb.w - ca.xy / ca.w;
+          float sl = length(sd);
+          if (sl > 1e-5) {
+            sd /= sl;
+            float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+            vec3 acc = vec3(0.0); float wsum = 0.0;
+            for (int i = 0; i < 14; i++) {
+              float f = (float(i) + jitter) / 14.0;
+              float wt = 1.0 - 0.7 * f;
+              acc += texture2D(tDiffuse, clamp(uv + sd * (0.3 - f) * wake * 0.14, 0.001, 0.999)).rgb * mix(vec3(1.0), vec3(0.55, 0.78, 1.3), f) * wt;
+              wsum += wt;
+            }
+            col = mix(col, acc / wsum * 2.6, smoothstep(0.0, 0.2, wake));
+          }
+        }
+        // threads of light streaming down it, on any background (even an empty sky)
+        float threads = noise2(vec2(across * 5.0, sR * 0.3 + uTime * 1.9));
+        float bands = pow(0.5 + 0.5 * sin(sR * 1.9 + uTime * 4.5), 4.0);
+        col += mix(vec3(0.25, 0.55, 1.0), vec3(0.3, 0.22, 0.95), along) * sqrt(wake) * wake * (0.05 + 0.55 * threads * threads + 0.14 * bands);
+      }
+
+      // Subtle, clean optical tint (preserves star colors)
+      col *= max(0.0, 1.0 + 1.2 * sMetric);
+      col *= mix(vec3(1.0), sMetric > 0.0 ? vec3(0.94, 0.97, 1.03) : vec3(1.04, 0.98, 0.94), min(1.0, abs(sMetric) * 0.8));
+
+      gl_FragColor = vec4(col, base.a);
+    }`,
+};
+
 export function createComposer(renderer, mainScene, probeScene, camera) {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
@@ -357,6 +514,9 @@ export function createComposer(renderer, mainScene, probeScene, camera) {
   const warp = new ShaderPass(WarpShader);
   warp.enabled = false;
   composer.addPass(warp);
+  const warpTrek = new ShaderPass(TrekWarpShader);
+  warpTrek.enabled = false;
+  composer.addPass(warpTrek);
   const probePass = new RenderPass(probeScene, camera);
   probePass.clear = false;
   probePass.clearDepth = true;
@@ -381,5 +541,5 @@ export function createComposer(renderer, mainScene, probeScene, camera) {
   const quad = bloom.fsQuad, draw = quad.render.bind(quad);
   quad.render = (r) => { if (quad.material !== bloom.blendMaterial) draw(r); };
   composer.addPass(output);
-  return { composer, lens, warp, bloom, mainPass, probePass };
+  return { composer, lens, warp, warpTrek, bloom, mainPass, probePass };
 }

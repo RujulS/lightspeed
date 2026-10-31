@@ -7,7 +7,7 @@ import { planetPos, planetVel, moonGeo, lambert, propagate, orbitalPeriod } from
 const atanh = Math.atanh;
 export const PROBES = [
   {
-    id: 'voyager', name: 'Voyager 1', tag: 'Real · launched 1977', kind: 'ballistic',
+    id: 'voyager', name: 'Voyager 1', tag: 'Real · launched 1977', group: 'Real Missions', kind: 'ballistic',
     // Inside the Solar System: real two-body (Lambert) trajectories with the best launch energy
     // ever flown (New Horizons, C3 = 157.7 km²/s² → v∞ 12.56 km/s). Beyond: Voyager 1's actual
     // heliocentric cruise speed after its Jupiter/Saturn gravity assists.
@@ -15,16 +15,16 @@ export const PROBES = [
     blurb: 'Fastest object leaving the Solar System. Cruises at 17 km/s (3.6 AU per year) after gravity assists at Jupiter and Saturn.',
   },
   {
-    id: 'parker', name: 'Parker Solar Probe', tag: 'Real · launched 2018', kind: 'cruise', v: 191.7e3,
+    id: 'parker', name: 'Parker Solar Probe', tag: 'Real · launched 2018', group: 'Real Missions', kind: 'cruise', v: 191.7e3,
     blurb: 'Fastest human-made object: 191.7 km/s at its closest approach to the Sun (Dec 2024). Here that record speed is held constant from launch, as a benchmark.',
   },
   {
-    id: 'orion', name: 'Project Orion', tag: 'Studied · 1958–1968', kind: 'thrust', flyby: true,
+    id: 'orion', name: 'Project Orion', tag: 'Studied · 1958–1968', group: 'Scientific Concepts', kind: 'thrust', flyby: true,
     stages: [{ a: G0, beta: 0.033, label: 'Nuclear pulse drive' }],
     blurb: 'Pushed by nuclear explosions against a pusher plate. Freeman Dyson\'s 1968 interstellar version: ~1 g pulses to 10,000 km/s (3.3% c).',
   },
   {
-    id: 'daedalus', name: 'Project Daedalus', tag: 'Studied · 1973–1978', kind: 'thrust', flyby: true,
+    id: 'daedalus', name: 'Project Daedalus', tag: 'Studied · 1973–1978', group: 'Scientific Concepts', kind: 'thrust', flyby: true,
     stages: [
       { a: C * atanh(0.071) / (2.05 * YEAR), beta: 0.071, label: 'Stage 1 fusion burn' },
       { a: C * (atanh(0.122) - atanh(0.071)) / (1.76 * YEAR), beta: 0.122, label: 'Stage 2 fusion burn' },
@@ -32,14 +32,19 @@ export const PROBES = [
     blurb: 'British Interplanetary Society design: two-stage inertial-confinement fusion rocket, 54,000 t, reaching 12.2% c in 3.8 years. Flyby only.',
   },
   {
-    id: 'antimatter', name: 'Antimatter Photon Ship', tag: 'Conceptual', kind: 'thrust', flyby: false,
+    id: 'antimatter', name: 'Antimatter Photon Ship', tag: 'Conceptual', group: 'Scientific Concepts', kind: 'thrust', flyby: false,
     stages: [{ a: G0, beta: 1, label: '1 g antimatter drive' }],
     blurb: 'Ideal relativistic rocket: constant 1 g felt aboard, flip at the midpoint, 1 g braking. Time dilation lets the crew reach other galaxies within a lifetime.',
   },
   {
-    id: 'warp', name: 'Alcubierre Warp Drive', tag: 'Speculative · 1994', kind: 'warp',
+    id: 'warp', name: 'Alcubierre Warp Drive', tag: 'Speculative · 1994', group: 'Scientific Concepts', kind: 'warp',
     speed: 1000, // × c; chosen in the menu (WARP_MIN … WARP_MAX)
     blurb: 'Miguel Alcubierre\'s 1994 solution of Einstein\'s equations: space contracts ahead of a bubble and expands behind it, carrying the ship faster than light while it sits at rest inside, feeling no acceleration, its clock in step with Earth\'s. It would need negative energy, which may not exist.',
+  },
+  {
+    id: 'enterprise', name: 'USS Enterprise (NCC-1701-A)', tag: 'Fictional · Star Trek (2286)', group: 'Fictional Spacecraft', kind: 'warp', scifi: true,
+    speed: 1000, // × c; adjustable in menu
+    blurb: 'Constitution-class Federation flagship commanded by Captain James T. Kirk. Powered by dual matter-antimatter warp drive nacelles for faster-than-light interstellar cruising, with sub-light impulse engines for in-system transit.',
   },
 ];
 export const WARP_MIN = 1, WARP_MAX = 525960; // up to one light-year a minute
@@ -135,10 +140,13 @@ export class Profile {
 // too short for the spool it peaks at V at the midpoint. `field` (0 … 1) is how far the wall is up.
 // ---------------------------------------------------------------------------------------------
 const WARP_SPOOL = 60, WARP_FORM = 4;
+// In the movies, warp engagement is an explosive blast into the journey: the bubble snaps
+// into existence almost immediately and rockets to warp speed in ~1.5 seconds. Sci-fi ships only.
+const SCIFI_SPOOL = 1.6, SCIFI_FORM = 0.6;
 
 export class WarpProfile {
-  constructor(V, L) {
-    const F = WARP_FORM, Ts = Math.min(WARP_SPOOL, L / V), Tc = Math.max(0, (L - V * Ts) / V), d = (V * Ts) / 2;
+  constructor(V, L, scifi = false) {
+    const F = scifi ? SCIFI_FORM : WARP_FORM, Ts = Math.min(scifi ? SCIFI_SPOOL : WARP_SPOOL, L / V), Tc = Math.max(0, (L - V * Ts) / V), d = (V * Ts) / 2;
     this.V = V; this.L = L; this.F = F; this.Ts = Ts; this.Tc = Tc;
     this.tStop = F + 2 * Ts + Tc;
     this.tArrive = this.tStop + F;
@@ -209,7 +217,7 @@ export class Mission {
       S = v3.add(E, v3.scale(dir, EARTH_R + DEPART_ALT));
       T = v3.sub(Tc, v3.scale(dir, d.standoff));
       const L = v3.len(v3.sub(T, S));
-      prof = p.kind === 'warp' ? new WarpProfile(p.speed * C, L)
+      prof = p.kind === 'warp' ? new WarpProfile(p.speed * C, L, p.scifi)
         : p.kind === 'cruise' ? new Profile({ v: p.v, L })
         : p.kind === 'ballistic' ? new Profile({ v: p.cruise, L })
           : new Profile({ stages: p.stages, L, rendezvous });

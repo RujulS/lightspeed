@@ -2,9 +2,10 @@ import { DAY, YEAR } from './constants.js';
 import { Mission, probeById } from './missions.js';
 import { fmtTime } from './ui.js';
 
-// Time flow: one round factor (1 s = 3 months, 1 s = 100 years …) for the whole trip, the same for
-// every ship going to the same destination, so faster ships visibly get there faster. The user can
-// step it up or down. Only three announced moments run slower: liftoff, planet flybys and arrival.
+// Time flow: one round factor (1 s = 3 months, 1 s = 100 years …) for the cruise of a trip, the same
+// for most ships going to the same destination, so faster ships visibly get there faster. Three
+// announced moments run slower: liftoff, planet flybys and arrival. Together they make the trip's
+// timeline; the user's speed (½×, 2× …) scales all of it evenly, so the proportions never change.
 
 const MONTH = YEAR / 12;
 const STEPS = [
@@ -34,10 +35,18 @@ export function rateText(r) {
   const s = STEPS.find((x) => Math.abs(x[0] / r - 1) < 1e-6);
   return r === 1 ? 'Real time' : `1 s = ${s ? s[1] : fmtTime(r)}`;
 }
-export function stepRate(r, dir) {
-  const i = RATES.findIndex((x) => x >= r * 0.999);
-  return RATES[Math.max(0, Math.min(RATES.length - 1, (i < 0 ? RATES.length - 1 : i) + dir))];
+
+// The user's speed: a plain multiplier on the whole timeline. Real time is no limit here: at ½× a
+// flyby already at real time plays in slow motion.
+export const SPEEDS = [1 / 8, 1 / 4, 1 / 2, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+export function stepSpeed(v, dir) {
+  return SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, SPEEDS.indexOf(v) + dir))];
 }
+export function speedText(v) {
+  return `${{ 0.125: '⅛', 0.25: '¼', 0.5: '½' }[v] ?? v.toLocaleString('en-US')}×`;
+}
+/** The rate as a settled, readable step (ramps sweep through every value between them). */
+export function roundRate(r) { return r < 1 ? r : niceRate(r); }
 
 /**
  * Default factor for a destination: a mid-range ship (Project Daedalus) makes the trip in about two
